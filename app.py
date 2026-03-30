@@ -32,7 +32,7 @@ if uploaded_file is not None:
                            3 * df['A-B數'] + 2 * df['A-B-數'] + 1 * df['B+數']) / df['Total_Count']
 
     # Tạo 3 Tabs
-    tab1, tab2, tab3 = st.tabs(["1. Bảng Thống kê & Tỉ lệ", "2. Ma trận Tương quan", "3. Phân tích Phân phối theo Cấp độ"])
+    tab1, tab2, tab3 = st.tabs(["1. Bảng Thống kê & Tỉ lệ", "2. Ma trận Tương quan", "3. Phân tích Tổng hợp Tất cả Dữ liệu"])
 
     # --- TAB 1: THỐNG KÊ KẾT QUẢ ---
     with tab1:
@@ -82,11 +82,11 @@ if uploaded_file is not None:
             max_corr_feature = corr_matrix.idxmin()[0]
             st.info(f"Dựa trên dữ liệu, thông số **{max_corr_feature}** có ảnh hưởng tiêu cực nhất đến điểm chất lượng. Khi {max_corr_feature} tăng cao, chất lượng có xu hướng giảm xuống.")
 
-    # --- TAB 3: PHÂN TÍCH PHÂN PHỐI THEO CẤP ĐỘ (NÂNG CẤP) ---
+    # --- TAB 3: PHÂN TÍCH PHÂN PHỐI TỔNG HỢP (KHÔNG DÙNG NÚT CHỌN) ---
     with tab3:
-        st.header("3. Định hình Cơ tính theo Cấp độ Chất lượng")
+        st.header("3. So sánh Phân bố Cơ tính giữa các Cấp độ Chất lượng")
+        st.markdown("Hệ thống tự động phân tích tất cả dữ liệu (không phân biệt độ dày) và vẽ biểu đồ so sánh cho toàn bộ các thông số cơ tính. **Vùng đồ thị nhô cao thể hiện giá trị tập trung nhiều nhất của cấp độ đó.**")
         
-        # Ánh xạ tên cấp độ với tên cột
         grade_mapping = {
             'A+B+ (Xuất sắc)': 'A+B+數',
             'A-B+ (Tốt)': 'A-B+數',
@@ -94,103 +94,49 @@ if uploaded_file is not None:
             'A-B- (Kém)': 'A-B-數',
             'B+ (Thứ phẩm)': 'B+數'
         }
+        features = ['YS', 'TS', 'EL', 'YPE', 'HARDNESS']
         
-        # Thanh điều khiển
-        col_ctrl1, col_ctrl2, col_ctrl3 = st.columns(3)
-        with col_ctrl1:
-            selected_thickness = st.selectbox("1. Lọc theo Độ dày:", df['厚度歸類'].unique(), key='tab3_thick')
-        with col_ctrl2:
-            selected_grade_label = st.selectbox("2. Chọn Cấp độ Chất lượng để phân tích:", list(grade_mapping.keys()), index=3) # Mặc định chọn A-B-
-            selected_grade_col = grade_mapping[selected_grade_label]
-        with col_ctrl3:
-            selected_feature = st.selectbox("3. Chọn Thông số Cơ tính:", features, key='tab3_feat')
+        # Thiết lập màu sắc riêng biệt cho từng cấp độ để dễ nhìn
+        colors = ['#2ca02c', '#1f77b4', '#ff7f0e', '#9467bd', '#d62728'] 
         
-        st.markdown("---")
-        
-        # Xử lý dữ liệu: Chỉ lấy các cuộn có tồn tại cấp độ chất lượng được chọn
-        df_thick = df[df['厚度歸類'] == selected_thickness]
-        # Lọc dữ liệu và bỏ các giá trị null
-        grade_data = df_thick[[selected_feature, selected_grade_col]].dropna()
-        # Chỉ lấy những cuộn mà số lượng cấp độ đó > 0
-        grade_data = grade_data[grade_data[selected_grade_col] > 0]
-        
-        if len(grade_data) < 2:
-            st.warning(f"Không đủ dữ liệu thống kê cho cấp độ **{selected_grade_label}** với độ dày {selected_thickness}.")
-        else:
-            # Dữ liệu và Trọng số (Số lượng điểm chất lượng)
-            values = grade_data[selected_feature].values
-            weights = grade_data[selected_grade_col].values
-            total_weight = weights.sum()
-
-            # --- TÍNH TOÁN CÁC CHỈ SỐ THỐNG KÊ CÓ TRỌNG SỐ ---
-            # 1. Trung bình có trọng số (Weighted Mean)
-            weighted_mean = np.average(values, weights=weights)
+        # Lặp qua tất cả các thông số cơ tính để tự động vẽ
+        for feature in features:
+            st.subheader(f"📊 Phân phối thông số: {feature}")
+            fig, ax = plt.subplots(figsize=(12, 5))
+            has_data = False
             
-            # 2. Độ lệch chuẩn có trọng số (Weighted Std Dev)
-            weighted_var = np.average((values - weighted_mean)**2, weights=weights)
-            weighted_std = np.sqrt(weighted_var)
+            # Vẽ đường cong phân phối cho từng cấp độ chất lượng trên cùng 1 biểu đồ
+            for (grade_label, grade_col), color in zip(grade_mapping.items(), colors):
+                # Lọc bỏ giá trị rỗng và lấy những cuộn có số lượng của cấp độ đó > 0
+                temp_df = df[[feature, grade_col]].dropna()
+                temp_df = temp_df[temp_df[grade_col] > 0]
+                
+                # Cần ít nhất vài điểm dữ liệu để thuật toán KDE có thể vẽ đường cong
+                if len(temp_df) > 3: 
+                    has_data = True
+                    sns.kdeplot(
+                        data=temp_df,
+                        x=feature,
+                        weights=grade_col,
+                        label=grade_label,
+                        fill=True,
+                        color=color,
+                        alpha=0.25,      # Độ trong suốt
+                        linewidth=2,
+                        ax=ax,
+                        warn_singular=False
+                    )
             
-            # 3. Phân vị có trọng số (Percentile 10 - 90) để xác định khoảng phân bố chủ yếu
-            # Cần sắp xếp dữ liệu để tính phân vị
-            sorter = np.argsort(values)
-            values_sorted = values[sorter]
-            weights_sorted = weights[sorter]
-            cum_weights = np.cumsum(weights_sorted)
-            
-            p10_idx = np.searchsorted(cum_weights, 0.10 * total_weight)
-            p90_idx = np.searchsorted(cum_weights, 0.90 * total_weight)
-            
-            # Đảm bảo index không vượt quá giới hạn
-            p10_idx = min(p10_idx, len(values_sorted) - 1)
-            p90_idx = min(p90_idx, len(values_sorted) - 1)
-            
-            weighted_p10 = values_sorted[p10_idx]
-            weighted_p90 = values_sorted[p90_idx]
-
-            # --- TRỰC QUAN HÓA BẰNG BIỂU ĐỒ PHÂN PHỐI CHUẨN ---
-            col_chart, col_stats = st.columns([2, 1])
-            
-            with col_chart:
-                fig3, ax3 = plt.subplots(figsize=(10, 6))
+            if has_data:
+                ax.set_xlabel(f"Giá trị {feature}", fontsize=11, fontweight='bold')
+                ax.set_ylabel("Mật độ phân bố", fontsize=11, fontweight='bold')
+                ax.legend(title="Cấp độ chất lượng")
+                ax.grid(axis='y', linestyle='--', alpha=0.6)
+                st.pyplot(fig)
+            else:
+                st.warning(f"Không có đủ dữ liệu để vẽ biểu đồ cho {feature}.")
                 
-                # 1. Vẽ Histogram thực tế (có trọng số)
-                sns.histplot(x=values, weights=weights, bins=20, stat='density', alpha=0.4, color='blue', label='Dữ liệu thực tế (Có trọng số)', ax=ax3)
-                
-                # 2. Vẽ đường cong Phân phối chuẩn toán học (Bell Curve) dựa trên mean và std có trọng số
-                xmin, xmax = ax3.get_xlim()
-                x_axis = np.linspace(xmin, xmax, 100)
-                # Đảm bảo Std Dev không phải là 0 để tránh lỗi toán học
-                if weighted_std > 0:
-                    p = stats.norm.pdf(x_axis, weighted_mean, weighted_std)
-                    ax3.plot(x_axis, p, 'k', linewidth=2, label=f'Đường cong Bell Curve lý thuyết\n(μ={weighted_mean:.1f}, σ={weighted_std:.1f})')
-                    
-                    # Tô màu vùng phân bố chủ yếu (10% - 90%)
-                    ax3.fill_between(x_axis, p, where=((x_axis >= weighted_p10) & (x_axis <= weighted_p90)), color='red', alpha=0.2, label='Khoảng phân bố chủ yếu (10%-90%)')
-                
-                # 3. Kẻ vạch các ranh giới phân vị
-                ax3.axvline(weighted_p10, color='red', linestyle='--', linewidth=2, label=f'Phân vị 10% ({weighted_p10:.1f})')
-                ax3.axvline(weighted_p90, color='red', linestyle='--', linewidth=2, label=f'Phân vị 90% ({weighted_p90:.1f})')
-                
-                ax3.set_title(f"Phân phối {selected_feature} của Cấp độ: {selected_grade_label} (Thép {selected_thickness})")
-                ax3.set_xlabel(f"Giá trị {selected_feature}")
-                ax3.set_ylabel("Mật độ phân phối")
-                ax3.legend(loc='upper right')
-                st.pyplot(fig3)
-                
-            with col_stats:
-                st.subheader("📊 Bảng kết quả thống kê")
-                st.markdown(f"**Thông số:** {selected_feature}")
-                st.markdown(f"**Tổng số điểm đánh giá được tích lũy:** {total_weight:.0f}")
-                
-                stats_df = pd.DataFrame({
-                    "Chỉ số Thống kê (Có trọng số)": ["Trung bình (μ)", "Độ lệch chuẩn (σ)", "Giới hạn Dưới (P10)", "Giới hạn Trên (P90)"],
-                    "Giá trị": [round(weighted_mean, 2), round(weighted_std, 2), round(weighted_p10, 2), round(weighted_p90, 2)]
-                })
-                st.dataframe(stats_df.set_index("Chỉ số Thống kê (Có trọng số)"), use_container_width=True)
-                
-                # Đưa ra nhận xét dựa trên so sánh giữa Hàng Tốt và Hàng Kém (Cần dữ liệu A+B+ để so sánh)
-                # Ở đây ta tạm đưa ra kết luận đơn giản cho cấp độ hiện tại
-                st.success(f"**Nhận xét:**\nHàng bị khách đánh giá là **{selected_grade_label}** phần lớn (80%) có giá trị {selected_feature} nằm trong khoảng **{round(weighted_p10, 2)} đến {round(weighted_p90, 2)}**.")
+            st.markdown("---") # Đường gạch ngang ngăn cách các biểu đồ
 
 else:
     st.info("Vui lòng tải file Excel dữ liệu của bạn ở thanh công cụ phía trên để bắt đầu phân tích.")
