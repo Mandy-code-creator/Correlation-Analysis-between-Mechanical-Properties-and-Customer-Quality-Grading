@@ -3,7 +3,6 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
-import scipy.stats as stats
 
 # Cấu hình trang Dashboard
 st.set_page_config(page_title="QC Data Analysis Dashboard", layout="wide")
@@ -80,10 +79,10 @@ if uploaded_file is not None:
             max_corr_feature = corr_matrix.idxmin()[0]
             st.info(f"Dựa trên dữ liệu, thông số **{max_corr_feature}** có ảnh hưởng tiêu cực nhất đến điểm chất lượng. Khi {max_corr_feature} tăng cao, chất lượng có xu hướng giảm xuống.")
 
-    # --- TAB 3: PHÂN TÍCH THEO ĐỘ DÀY & CẤP ĐỘ CHẤT LƯỢNG ---
+    # --- TAB 3: PHÂN TÍCH THEO ĐỘ DÀY & CẤP ĐỘ CHẤT LƯỢNG (CẬP NHẬT HIỂN THỊ DỮ LIỆU THỰC TẾ) ---
     with tab3:
         st.header("3. So sánh Cơ tính phân rã theo Độ Dày và Cấp Độ")
-        st.markdown("Mỗi nhóm thông số cơ tính được chia thành các biểu đồ theo **Độ dày**. Các đường màu thể hiện 5 **Cấp độ chất lượng** phân bố chồng lên nhau.")
+        st.markdown("Biểu đồ kết hợp cột dữ liệu thực tế (Histogram), đường xu hướng (KDE) và **đường nét đứt thể hiện giá trị Trung bình** của từng cấp độ.")
         
         grade_mapping = {
             'A+B+ (Xuất sắc)': 'A+B+數',
@@ -103,8 +102,6 @@ if uploaded_file is not None:
         for feature in features:
             st.subheader(f"📊 Thông số: {feature}")
             
-            # Khởi tạo khung biểu đồ gồm nhiều đồ thị nằm ngang tương ứng với số lượng độ dày
-            # Kích thước chiều ngang linh hoạt theo số lượng độ dày (mỗi đồ thị rộng 5 inch)
             fig, axes = plt.subplots(nrows=1, ncols=num_thick, figsize=(5 * num_thick, 4.5), squeeze=False)
             
             for i, thickness in enumerate(thickness_list):
@@ -119,29 +116,46 @@ if uploaded_file is not None:
                     
                     if len(temp_df) > 3: 
                         has_data = True
-                        sns.kdeplot(
+                        
+                        # 1. Vẽ phân bố dữ liệu thực (Histogram) + Đường cong (KDE)
+                        sns.histplot(
                             data=temp_df,
                             x=feature,
                             weights=grade_col,
                             label=grade_label,
-                            fill=True,
                             color=color,
-                            alpha=0.3, # Tăng độ mờ lên 0.3 để dễ nhìn phần giao nhau
-                            linewidth=1.5,
+                            kde=True,          # Bật đường cong mật độ
+                            stat="density",    # Chuẩn hóa để các cột không bị quá cao
+                            alpha=0.25,        # Độ trong suốt của cột
+                            linewidth=0.5,     # Viền của cột histogram
                             ax=ax,
                             warn_singular=False
                         )
+                        
+                        # 2. Tính và vẽ đường Trung bình (Mean)
+                        values = temp_df[feature].values
+                        weights = temp_df[grade_col].values
+                        if weights.sum() > 0:
+                            weighted_mean = np.average(values, weights=weights)
+                            # Vẽ đường nét đứt dọc xuống
+                            ax.axvline(weighted_mean, color=color, linestyle='--', linewidth=1.5, alpha=0.9)
                 
                 # Trang trí trục và tiêu đề
                 if has_data:
                     ax.set_title(f"Độ dày: {thickness}", fontsize=12, fontweight='bold')
                     ax.set_xlabel(f"Giá trị {feature}")
-                    ax.set_ylabel("Mật độ phân bố" if i == 0 else "") # Chỉ để chữ Mật độ ở biểu đồ đầu tiên bên trái
-                    ax.grid(axis='y', linestyle='--', alpha=0.5)
+                    ax.set_ylabel("Mật độ & Phân bố" if i == 0 else "") 
+                    ax.grid(axis='y', linestyle=':', alpha=0.6)
                     
-                    # Chỉ hiển thị Legend (chú thích màu) ở biểu đồ cuối cùng bên phải để đỡ rối mắt
+                    # Xử lý Legend: Chỉ hiển thị ở biểu đồ cuối cùng bên phải
                     if i == num_thick - 1:
-                        ax.legend(title="Cấp độ chất lượng", bbox_to_anchor=(1.05, 1), loc='upper left')
+                        # sns.histplot với kde=True tạo ra 2 labels cho mỗi nhóm, ta dùng get_legend_handles_labels để lọc
+                        handles, labels = ax.get_legend_handles_labels()
+                        # Chỉ giữ lại các label không trùng lặp (lấy nửa đầu tiên)
+                        unique_labels = list(grade_mapping.keys())
+                        unique_handles = [h for h, l in zip(handles, labels) if l in unique_labels]
+                        if unique_handles:
+                            ax.legend(unique_handles, unique_labels, title="Cấp độ chất lượng", bbox_to_anchor=(1.05, 1), loc='upper left')
                 else:
                     ax.set_title(f"Độ dày: {thickness}\n(Không có dữ liệu)", fontsize=11, color='gray')
                     ax.axis('off')
