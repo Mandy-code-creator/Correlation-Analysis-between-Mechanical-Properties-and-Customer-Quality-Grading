@@ -110,13 +110,8 @@ if uploaded_file is not None:
 
     # --- TAB 4: SAFE WINDOW OPTIMIZATION ---
     with tab4:
-        st.header("4. Safe Operating Window by Thickness")
-        st.markdown("""
-        This section compares the **measured mechanical properties** with the 
-        **safe zone values (mean - 2σ)** and the **specification limits**, 
-        separated by thickness category. Control limits are proposed narrower 
-        than spec limits to ensure quality safety.
-        """)
+        st.header("4. Safe Operating Window by Thickness (with I-MR & Sigma Control)")
+        sigma_factor = st.slider("Select Sigma Factor", 1.5, 3.5, 2.0, 0.5)
 
         spec_limits = {
             "YS": (405, 500),
@@ -136,7 +131,7 @@ if uploaded_file is not None:
             for feat in mech_features:
                 mean_val = df_t[feat].mean(skipna=True)
                 std_val = df_t[feat].std(skipna=True)
-                safe_val = mean_val - 2*std_val if pd.notnull(std_val) else np.nan
+                safe_val = mean_val - sigma_factor*std_val if pd.notnull(std_val) else np.nan
                 low, high = spec_limits.get(feat, (None, None))
                 if low is not None and high is not None:
                     ctrl_low = low + 0.05*(high-low)
@@ -154,7 +149,7 @@ if uploaded_file is not None:
                 status_list.append({
                     "Feature": feat,
                     "Measured Mean": round(mean_val, 2),
-                    "Safe Zone (Mean - 2σ)": round(safe_val, 2),
+                    f"Safe Zone (Mean - {sigma_factor}σ)": round(safe_val, 2),
                     "Spec Limit": f"{low}–{high}" if high else f">={low}",
                     "Proposed Control Limit": ctrl_limit,
                     "Status": status
@@ -162,38 +157,30 @@ if uploaded_file is not None:
             status_df = pd.DataFrame(status_list)
             st.dataframe(status_df, use_container_width=True)
 
-            # --- Plot pairs: YS–TS, EL–YPE ---
-            pairs = [("YS","TS"), ("EL","YPE")]
-            target_grade = 'A-B+數'
+            # --- I-MR Chart for each feature ---
+            for feat in mech_features:
+                st.markdown(f"### I-MR Chart: {feat}")
+                vals = df_t[feat].dropna().values
+                if len(vals) > 1:
+                    # Individuals chart
+                    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 6))
+                    ax1.plot(vals, marker='o', color='blue')
+                    mean_val = np.mean(vals)
+                    std_val = np.std(vals, ddof=1)
+                    UCL = mean_val + sigma_factor*std_val
+                    LCL = mean_val - sigma_factor*std_val
+                    ax1.axhline(mean_val, color='green', linestyle='--', label='Mean')
+                    ax1.axhline(UCL, color='red', linestyle='--', label=f'UCL ({sigma_factor}σ)')
+                    ax1.axhline(LCL, color='red', linestyle='--', label=f'LCL ({sigma_factor}σ)')
+                    ax1.set_title(f"Individuals Chart for {feat}")
+                    ax1.legend()
 
-            for f1, f2 in pairs:
-                if f1 in df_t.columns and f2 in df_t.columns:
-                    st.markdown(f"### Success Probability Curves: {f1} & {f2}")
-                    fig, axes = plt.subplots(1, 2, figsize=(18, 5))
-                    for ax, feat in zip(axes, [f1, f2]):
-                        temp_opt = df_t[[feat, target_grade, 'Total_Count']].dropna()
-                        if len(temp_opt) > 0:
-                            temp_opt['bin'] = pd.qcut(temp_opt[feat], q=12, duplicates='drop')
-                            bin_res = temp_opt.groupby('bin', observed=True).agg({
-                                target_grade: 'sum',
-                                'Total_Count': 'sum'
-                            })
-                            bin_res['Success_Rate'] = (bin_res[target_grade] / bin_res['Total_Count'] * 100).round(2)
-                            bin_res['Mid'] = bin_res.index.map(lambda x: x.mid)
-                            avg_rate = bin_res['Success_Rate'].mean()
-                            safe_bins = bin_res[bin_res['Success_Rate'] > avg_rate]
-                            if not safe_bins.empty:
-                                low_s, high_s = safe_bins.index[0].left, safe_bins.index[-1].right
-                                ax.set_title(f"{feat} Window: {low_s:.1f}-{high_s:.1f}", fontsize=12)
-                            # Combined plot
-                            ax.bar(bin_res['Mid'].astype(float), bin_res['Total_Count'], 
-                                   color='lightgray', alpha=0.5, label="Volume")
-                            ax2 = ax.twinx()
-                            ax2.plot(bin_res['Mid'].astype(float), bin_res['Success_Rate'], 
-                                     marker='o', color='green', lw=2, label="Success %")
-                            ax.set_xlabel(feat)
-                            ax.set_ylabel("Volume", color='gray')
-                            ax2.set_ylabel("Success %", color='green')
-                            ax2.set_ylim(0, 105)
+                    # Moving Range chart
+                    MR = np.abs(np.diff(vals))
+                    ax2.plot(MR, marker='o', color='orange')
+                    MR_mean = np.mean(MR)
+                    ax2.axhline(MR_mean, color='green', linestyle='--', label='MR Mean')
+                    ax2.set_title(f"Moving Range Chart for {feat}")
+                    ax2.legend()
+
                     st.pyplot(fig)
-                    st.markdown("---")
