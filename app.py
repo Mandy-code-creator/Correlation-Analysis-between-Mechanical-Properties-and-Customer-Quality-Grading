@@ -118,7 +118,6 @@ if uploaded_file is not None:
         than spec limits to ensure quality safety.
         """)
 
-        # Specification limits
         spec_limits = {
             "YS": (405, 500),
             "TS": (415, 550),
@@ -132,14 +131,13 @@ if uploaded_file is not None:
             st.subheader(f"Thickness Category: {thick}")
             df_t = df[df['厚度歸類'] == thick]
 
+            # Summary table
             status_list = []
             for feat in mech_features:
                 mean_val = df_t[feat].mean(skipna=True)
                 std_val = df_t[feat].std(skipna=True)
                 safe_val = mean_val - 2*std_val if pd.notnull(std_val) else np.nan
                 low, high = spec_limits.get(feat, (None, None))
-
-                # Propose narrower control limits (5% margin inside spec)
                 if low is not None and high is not None:
                     ctrl_low = low + 0.05*(high-low)
                     ctrl_high = high - 0.05*(high-low)
@@ -148,13 +146,11 @@ if uploaded_file is not None:
                     ctrl_limit = f">={low+ (0.05*low):.2f}"
                 else:
                     ctrl_limit = "N/A"
-
                 status = "✅ Safe"
                 if low is not None and safe_val < low:
                     status = "⚠ Risk (below limit)"
                 if high is not None and safe_val > high:
                     status = "⚠ Risk (above limit)"
-
                 status_list.append({
                     "Feature": feat,
                     "Measured Mean": round(mean_val, 2),
@@ -163,48 +159,41 @@ if uploaded_file is not None:
                     "Proposed Control Limit": ctrl_limit,
                     "Status": status
                 })
-
             status_df = pd.DataFrame(status_list)
             st.dataframe(status_df, use_container_width=True)
 
-            # Success Probability Curve
-            target_grade = 'A-B+數' 
-            for feat in mech_features:
-                st.markdown(f"### Optimization Analysis: {feat}")
-                temp_opt = df_t[[feat, target_grade, 'Total_Count']].dropna()
-                if len(temp_opt) > 0:
-                    temp_opt['bin'] = pd.qcut(temp_opt[feat], q=12, duplicates='drop')
-                    bin_res = temp_opt.groupby('bin', observed=True).agg({
-                        target_grade: 'sum',
-                        'Total_Count': 'sum'
-                    })
-                    bin_res['Success_Rate'] = (bin_res[target_grade] / bin_res['Total_Count'] * 100).round(2)
-                    bin_res['Mid'] = bin_res.index.map(lambda x: x.mid)
+            # --- Plot pairs: YS–TS, EL–YPE ---
+            pairs = [("YS","TS"), ("EL","YPE")]
+            target_grade = 'A-B+數'
 
-                    avg_rate = bin_res['Success_Rate'].mean()
-                    safe_bins = bin_res[bin_res['Success_Rate'] > avg_rate]
-
-                    if not safe_bins.empty:
-                        low_s, high_s = safe_bins.index[0].left, safe_bins.index[-1].right
-                        st.success(f"✅ Safe Operating Window for {feat}: {low_s:.1f} - {high_s:.1f}")
-                        st.info(f"Average probability of A-B+ in this window: {safe_bins['Success_Rate'].mean():.1f}%")
-
-                    # Combined Plot (Bar + Line)
-                    fig_s, ax_s = plt.subplots(figsize=(12, 5))
-                    ax_s.bar(bin_res['Mid'].astype(float), bin_res['Total_Count'], 
-                             color='lightgray', alpha=0.5, label="Production Volume")
-                    ax_s2 = ax_s.twinx()
-                    ax_s2.plot(bin_res['Mid'].astype(float), bin_res['Success_Rate'], 
-                               marker='o', color='green', lw=2.5, label="Success Probability")
-
-                    ax_s.set_xlabel(f"{feat} Range")
-                    ax_s.set_ylabel("Total Production Volume", color='gray')
-                    ax_s2.set_ylabel("A-B+ Success Probability (%)", color='green')
-                    ax_s2.set_ylim(0, 105)
-
-                    plt.title(f"Combined Success Probability Curve for {feat} (Thickness {thick})")
-                    ax_s.legend(loc="upper left")
-                    ax_s2.legend(loc="upper right")
-
-                    st.pyplot(fig_s)
+            for f1, f2 in pairs:
+                if f1 in df_t.columns and f2 in df_t.columns:
+                    st.markdown(f"### Success Probability Curves: {f1} & {f2}")
+                    fig, axes = plt.subplots(1, 2, figsize=(18, 5))
+                    for ax, feat in zip(axes, [f1, f2]):
+                        temp_opt = df_t[[feat, target_grade, 'Total_Count']].dropna()
+                        if len(temp_opt) > 0:
+                            temp_opt['bin'] = pd.qcut(temp_opt[feat], q=12, duplicates='drop')
+                            bin_res = temp_opt.groupby('bin', observed=True).agg({
+                                target_grade: 'sum',
+                                'Total_Count': 'sum'
+                            })
+                            bin_res['Success_Rate'] = (bin_res[target_grade] / bin_res['Total_Count'] * 100).round(2)
+                            bin_res['Mid'] = bin_res.index.map(lambda x: x.mid)
+                            avg_rate = bin_res['Success_Rate'].mean()
+                            safe_bins = bin_res[bin_res['Success_Rate'] > avg_rate]
+                            if not safe_bins.empty:
+                                low_s, high_s = safe_bins.index[0].left, safe_bins.index[-1].right
+                                ax.set_title(f"{feat} Window: {low_s:.1f}-{high_s:.1f}", fontsize=12)
+                            # Combined plot
+                            ax.bar(bin_res['Mid'].astype(float), bin_res['Total_Count'], 
+                                   color='lightgray', alpha=0.5, label="Volume")
+                            ax2 = ax.twinx()
+                            ax2.plot(bin_res['Mid'].astype(float), bin_res['Success_Rate'], 
+                                     marker='o', color='green', lw=2, label="Success %")
+                            ax.set_xlabel(feat)
+                            ax.set_ylabel("Volume", color='gray')
+                            ax2.set_ylabel("Success %", color='green')
+                            ax2.set_ylim(0, 105)
+                    st.pyplot(fig)
                     st.markdown("---")
