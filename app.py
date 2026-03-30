@@ -19,6 +19,8 @@ if uploaded_file is not None:
     df = pd.read_excel(uploaded_file)
     df.columns = df.columns.str.strip()
 
+    exported_figures = {} # Dictionary to store charts for Excel export
+
     # --- 2. DATA PREPROCESSING ---
     count_cols = ['A+B+數', 'A-B+數', 'A-B數', 'A-B-數', 'B+數']
     count_cols = [col for col in count_cols if col in df.columns]
@@ -29,6 +31,7 @@ if uploaded_file is not None:
     mech_features = [feat for feat in mech_features if feat in df.columns]
     for feat in mech_features:
         df[feat] = pd.to_numeric(df[feat], errors='coerce')
+        # Clean data: remove 0 or negative values
         df.loc[df[feat] <= 0, feat] = np.nan
 
     df['Total_Count'] = df[count_cols].sum(axis=1)
@@ -39,10 +42,12 @@ if uploaded_file is not None:
                            3 * df.get('A-B數',0) + 2 * df.get('A-B-數',0) + 1 * df.get('B+數',0)) / df['Total_Count']
 
     # --- CREATE TABS ---
-    tab1, tab2, tab3, tab4 = st.tabs(["1. Summary Table & Pie Charts", 
-                                       "2. Correlation Matrix", 
-                                       "3. Weighted Distribution by Thickness",
-                                       "4. Optimal Mechanical Limits"])
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "1. Summary Table & Pie Charts", 
+        "2. Correlation Matrix", 
+        "3. Weighted Distribution by Thickness",
+        "4. Optimal Mechanical Limits"
+    ])
 
     # --- TAB 1 ---
     with tab1:
@@ -57,14 +62,15 @@ if uploaded_file is not None:
         with col1:
             st.subheader("Summary Table")
             display_df = summary_df.copy()
-            display_df.rename(columns={'厚度歸類': 'Thickness'}, inplace=True)
+            display_df.rename(columns={
+                '厚度歸類': 'Thickness',
+                'A+B+數': 'Count A+B+',
+                'A-B+數': 'Count A-B+',
+                'A-B數': 'Count A-B',
+                'A-B-數': 'Count A-B-',
+                'B+數': 'Count B+'
+            }, inplace=True)
             st.dataframe(display_df, use_container_width=True)
-
-            # Download button
-            towrite = io.BytesIO()
-            display_df.to_excel(towrite, index=False, engine='openpyxl')
-            towrite.seek(0)
-            st.download_button("📥 Download Excel", data=towrite, file_name="Summary_QC.xlsx")
 
         with col2:
             st.subheader("Percentage Pie Charts")
@@ -94,6 +100,7 @@ if uploaded_file is not None:
             fig1.legend(plot_df.columns, title="Quality Grade", bbox_to_anchor=(1.0,0.5), loc="center left", fontsize=14, title_fontsize=16)
             plt.tight_layout()
             st.pyplot(fig1, use_container_width=True)
+            exported_figures['Quality_Proportions'] = fig1
 
     # --- TAB 2 ---
     with tab2:
@@ -162,6 +169,7 @@ if uploaded_file is not None:
                         ax.axis('off')
                 plt.tight_layout()
                 st.pyplot(fig, use_container_width=True)
+                exported_figures[f'{feature}_Distribution'] = fig
 
     # --- TAB 4 ---
     with tab4:
@@ -169,22 +177,57 @@ if uploaded_file is not None:
         limits = []
         for feat in mech_features:
             all_vals = []
+            # Drop NaNs beforehand so np.percentile doesn't fail
+            valid_df = df.dropna(subset=[feat]) 
+            
             for grade_col in count_cols:
-                mask = df[grade_col]>0
+                mask = valid_df[grade_col] > 0
                 if mask.any():
-                    vals = df.loc[mask, feat].values
-                    w = df.loc[mask, grade_col].values
+                    vals = valid_df.loc[mask, feat].values
+                    w = valid_df.loc[mask, grade_col].values
                     all_vals.extend(np.repeat(vals, w.astype(int)))
-            if len(all_vals)>0:
+                    
+            if len(all_vals) > 0:
                 arr = np.array(all_vals)
-                lower = np.percentile(arr,2.5)
-                upper = np.percentile(arr,97.5)
+                lower = np.percentile(arr, 2.5)
+                upper = np.percentile(arr, 97.5)
                 mean = np.mean(arr)
                 std = np.std(arr)
-                limits.append({'Parameter':feat,'Lower Limit':lower,'Upper Limit':upper,'Weighted Mean':mean,'Weighted Std':std})
+                limits.append({'Parameter': feat, 'Lower Limit': round(lower, 2), 'Upper Limit': round(upper, 2), 'Weighted Mean': round(mean, 2), 'Weighted Std': round(std, 2)})
+                
         limits_df = pd.DataFrame(limits)
         st.dataframe(limits_df, use_container_width=True)
-        st.markdown("*Optimal limits are based on weighted 2.5%–97.5% percentile of actual distribution.*")
+        st.markdown("*Optimal limits are based on weighted 2.5%–97.5% percentile of the actual distribution.*")
+
+    # --- FULL EXCEL EXPORT ---
+    st.markdown("## 📥 Export Full Report")
+    
+    excel_buffer = io.BytesIO()
+    with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
+        display_df.to_excel(writer, sheet_name='Summary_Data', index=False)
+        corr_matrix.to_excel(writer, sheet_name='Correlation_Matrix')
+        if not limits_df.empty:
+            limits_df.to_excel(writer, sheet_name='Optimal_Limits', index=False)
+        
+        workbook = writer.book
+        worksheet_charts = workbook.add_worksheet('Generated_Charts')
+        worksheet_charts.write('A1', 'QC Analysis Charts')
+        
+        row_idx = 2
+        for chart_name, fig_obj in exported_figures.items():
+            img_buffer = io.BytesIO()
+            fig_obj.savefig(img_buffer, format='png', bbox_inches='tight')
+            worksheet_charts.write(row_idx, 1, chart_name.replace('_', ' '))
+            worksheet_charts.insert_image(row_idx + 2, 1, '', {'image_data': img_buffer, 'x_scale': 0.6, 'y_scale': 0.6})
+            row_idx += 40
+            
+    excel_buffer.seek(0)
+    st.download_button(
+        label="📥 Download Full Excel Report (Data & Charts)",
+        data=excel_buffer,
+        file_name="QC_Analysis_Full_Report.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
 else:
     st.info("Please upload your Excel data to start analysis.")
