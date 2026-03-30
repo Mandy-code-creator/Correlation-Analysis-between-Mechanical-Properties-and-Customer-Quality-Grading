@@ -125,11 +125,10 @@ if uploaded_file is not None:
                             label=grade_label,
                             color=color,
                             kde=True,          # Bật đường cong mật độ
-                            stat="count",      # <-- Dùng 'count' để trục Y hiện số lượng cuộn
+                            stat="count",      # Dùng 'count' để trục Y hiện số lượng cuộn
                             alpha=0.25,        # Độ trong suốt của cột
                             linewidth=0.5,     # Viền của cột histogram
                             ax=ax
-                            # (Đã loại bỏ warn_singular=False để khắc phục lỗi)
                         )
                         
                         # 2. Tính và vẽ đường Trung bình (Mean)
@@ -144,15 +143,12 @@ if uploaded_file is not None:
                 if has_data:
                     ax.set_title(f"Độ dày: {thickness}", fontsize=12, fontweight='bold')
                     ax.set_xlabel(f"Giá trị {feature}")
-                    # <-- Đổi nhãn trục Y thành "Số lượng cuộn"
                     ax.set_ylabel("Số lượng cuộn" if i == 0 else "") 
                     ax.grid(axis='y', linestyle=':', alpha=0.6)
                     
                     # Xử lý Legend: Chỉ hiển thị ở biểu đồ cuối cùng bên phải
                     if i == num_thick - 1:
-                        # sns.histplot với kde=True tạo ra 2 labels cho mỗi nhóm, ta dùng get_legend_handles_labels để lọc
                         handles, labels = ax.get_legend_handles_labels()
-                        # Chỉ giữ lại các label không trùng lặp
                         unique_labels = list(grade_mapping.keys())
                         unique_handles = [h for h, l in zip(handles, labels) if l in unique_labels]
                         if unique_handles:
