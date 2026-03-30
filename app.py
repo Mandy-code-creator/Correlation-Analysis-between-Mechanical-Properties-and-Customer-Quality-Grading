@@ -32,7 +32,7 @@ if uploaded_file is not None:
                            3 * df['A-B數'] + 2 * df['A-B-數'] + 1 * df['B+數']) / df['Total_Count']
 
     # Tạo 3 Tabs
-    tab1, tab2, tab3 = st.tabs(["1. Bảng Thống kê & Tỉ lệ", "2. Ma trận Tương quan", "3. Phân tích Tổng hợp Tất cả Dữ liệu"])
+    tab1, tab2, tab3 = st.tabs(["1. Bảng Thống kê & Tỉ lệ", "2. Ma trận Tương quan", "3. Phân tích Dữ liệu Toàn cảnh"])
 
     # --- TAB 1: THỐNG KÊ KẾT QUẢ ---
     with tab1:
@@ -42,7 +42,6 @@ if uploaded_file is not None:
         summary_df = df.groupby('厚度歸類')[count_cols].sum().reset_index()
         summary_df['Tổng cuộn kiểm tra'] = summary_df[count_cols].sum(axis=1)
         
-        # Tính % A+B+
         summary_df['Tỉ lệ A+B+ (%)'] = (summary_df['A+B+數'] / summary_df['Tổng cuộn kiểm tra'] * 100).round(2)
         
         col1, col2 = st.columns([1, 1])
@@ -66,7 +65,6 @@ if uploaded_file is not None:
         st.header("2. Ma trận Hệ số Tương quan")
         features = ['YS', 'TS', 'EL', 'YPE', 'HARDNESS']
         
-        # Tính toán ma trận tương quan chỉ cho các cột cần thiết
         corr_matrix = df[['Quality_Score'] + features].corr()[['Quality_Score']].drop('Quality_Score')
         corr_matrix.columns = ['Độ tương quan với Điểm Chất lượng Tổng']
         
@@ -82,10 +80,10 @@ if uploaded_file is not None:
             max_corr_feature = corr_matrix.idxmin()[0]
             st.info(f"Dựa trên dữ liệu, thông số **{max_corr_feature}** có ảnh hưởng tiêu cực nhất đến điểm chất lượng. Khi {max_corr_feature} tăng cao, chất lượng có xu hướng giảm xuống.")
 
-    # --- TAB 3: PHÂN TÍCH PHÂN PHỐI TỔNG HỢP (KHÔNG DÙNG NÚT CHỌN) ---
+    # --- TAB 3: PHÂN TÍCH THEO ĐỘ DÀY & CẤP ĐỘ CHẤT LƯỢNG ---
     with tab3:
-        st.header("3. So sánh Phân bố Cơ tính giữa các Cấp độ Chất lượng")
-        st.markdown("Hệ thống tự động phân tích tất cả dữ liệu (không phân biệt độ dày) và vẽ biểu đồ so sánh cho toàn bộ các thông số cơ tính. **Vùng đồ thị nhô cao thể hiện giá trị tập trung nhiều nhất của cấp độ đó.**")
+        st.header("3. So sánh Cơ tính phân rã theo Độ Dày và Cấp Độ")
+        st.markdown("Mỗi nhóm thông số cơ tính được chia thành các biểu đồ theo **Độ dày**. Các đường màu thể hiện 5 **Cấp độ chất lượng** phân bố chồng lên nhau.")
         
         grade_mapping = {
             'A+B+ (Xuất sắc)': 'A+B+數',
@@ -95,48 +93,62 @@ if uploaded_file is not None:
             'B+ (Thứ phẩm)': 'B+數'
         }
         features = ['YS', 'TS', 'EL', 'YPE', 'HARDNESS']
-        
-        # Thiết lập màu sắc riêng biệt cho từng cấp độ để dễ nhìn
         colors = ['#2ca02c', '#1f77b4', '#ff7f0e', '#9467bd', '#d62728'] 
         
-        # Lặp qua tất cả các thông số cơ tính để tự động vẽ
+        # Lấy danh sách độ dày và sắp xếp
+        thickness_list = df['厚度歸類'].dropna().unique()
+        thickness_list = sorted(thickness_list, key=lambda x: str(x))
+        num_thick = len(thickness_list)
+        
         for feature in features:
-            st.subheader(f"📊 Phân phối thông số: {feature}")
-            fig, ax = plt.subplots(figsize=(12, 5))
-            has_data = False
+            st.subheader(f"📊 Thông số: {feature}")
             
-            # Vẽ đường cong phân phối cho từng cấp độ chất lượng trên cùng 1 biểu đồ
-            for (grade_label, grade_col), color in zip(grade_mapping.items(), colors):
-                # Lọc bỏ giá trị rỗng và lấy những cuộn có số lượng của cấp độ đó > 0
-                temp_df = df[[feature, grade_col]].dropna()
-                temp_df = temp_df[temp_df[grade_col] > 0]
-                
-                # Cần ít nhất vài điểm dữ liệu để thuật toán KDE có thể vẽ đường cong
-                if len(temp_df) > 3: 
-                    has_data = True
-                    sns.kdeplot(
-                        data=temp_df,
-                        x=feature,
-                        weights=grade_col,
-                        label=grade_label,
-                        fill=True,
-                        color=color,
-                        alpha=0.25,      # Độ trong suốt
-                        linewidth=2,
-                        ax=ax,
-                        warn_singular=False
-                    )
+            # Khởi tạo khung biểu đồ gồm nhiều đồ thị nằm ngang tương ứng với số lượng độ dày
+            # Kích thước chiều ngang linh hoạt theo số lượng độ dày (mỗi đồ thị rộng 5 inch)
+            fig, axes = plt.subplots(nrows=1, ncols=num_thick, figsize=(5 * num_thick, 4.5), squeeze=False)
             
-            if has_data:
-                ax.set_xlabel(f"Giá trị {feature}", fontsize=11, fontweight='bold')
-                ax.set_ylabel("Mật độ phân bố", fontsize=11, fontweight='bold')
-                ax.legend(title="Cấp độ chất lượng")
-                ax.grid(axis='y', linestyle='--', alpha=0.6)
-                st.pyplot(fig)
-            else:
-                st.warning(f"Không có đủ dữ liệu để vẽ biểu đồ cho {feature}.")
+            for i, thickness in enumerate(thickness_list):
+                ax = axes[0, i]
+                df_thick = df[df['厚度歸類'] == thickness]
+                has_data = False
                 
-            st.markdown("---") # Đường gạch ngang ngăn cách các biểu đồ
+                # Vẽ từng cấp độ chất lượng
+                for (grade_label, grade_col), color in zip(grade_mapping.items(), colors):
+                    temp_df = df_thick[[feature, grade_col]].dropna()
+                    temp_df = temp_df[temp_df[grade_col] > 0]
+                    
+                    if len(temp_df) > 3: 
+                        has_data = True
+                        sns.kdeplot(
+                            data=temp_df,
+                            x=feature,
+                            weights=grade_col,
+                            label=grade_label,
+                            fill=True,
+                            color=color,
+                            alpha=0.3, # Tăng độ mờ lên 0.3 để dễ nhìn phần giao nhau
+                            linewidth=1.5,
+                            ax=ax,
+                            warn_singular=False
+                        )
+                
+                # Trang trí trục và tiêu đề
+                if has_data:
+                    ax.set_title(f"Độ dày: {thickness}", fontsize=12, fontweight='bold')
+                    ax.set_xlabel(f"Giá trị {feature}")
+                    ax.set_ylabel("Mật độ phân bố" if i == 0 else "") # Chỉ để chữ Mật độ ở biểu đồ đầu tiên bên trái
+                    ax.grid(axis='y', linestyle='--', alpha=0.5)
+                    
+                    # Chỉ hiển thị Legend (chú thích màu) ở biểu đồ cuối cùng bên phải để đỡ rối mắt
+                    if i == num_thick - 1:
+                        ax.legend(title="Cấp độ chất lượng", bbox_to_anchor=(1.05, 1), loc='upper left')
+                else:
+                    ax.set_title(f"Độ dày: {thickness}\n(Không có dữ liệu)", fontsize=11, color='gray')
+                    ax.axis('off')
+            
+            plt.tight_layout()
+            st.pyplot(fig)
+            st.markdown("---")
 
 else:
     st.info("Vui lòng tải file Excel dữ liệu của bạn ở thanh công cụ phía trên để bắt đầu phân tích.")
