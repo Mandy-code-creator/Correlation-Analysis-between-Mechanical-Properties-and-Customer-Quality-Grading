@@ -108,7 +108,7 @@ if uploaded_file is not None:
                 ax.legend(title="Quality Grade", bbox_to_anchor=(1.01, 1), loc='upper left')
             st.pyplot(fig)
 
-    # --- TAB 4: SAFE WINDOW OPTIMIZATION ---
+       # --- TAB 4: SAFE WINDOW OPTIMIZATION ---
     with tab4:
         st.header("4. Safe Operating Window (Measured vs Safe Zone vs Spec Limit)")
         st.markdown("""
@@ -116,6 +116,7 @@ if uploaded_file is not None:
         **safe zone values (mean - 2σ)** and the **specification limits**.
         """)
 
+        # Specification limits
         spec_limits = {
             "YS": (405, 500),
             "TS": (415, 550),
@@ -123,6 +124,7 @@ if uploaded_file is not None:
             "YPE": (4, None)
         }
 
+        # Build summary table
         status_list = []
         for feat in mech_features:
             mean_val = df[feat].mean(skipna=True)
@@ -147,10 +149,12 @@ if uploaded_file is not None:
         st.markdown("---")
         st.subheader("Success Probability Curve (A-B+ Grade)")
         target_grade = 'A-B+數' 
+
         for feat in mech_features:
             st.markdown(f"### Optimization Analysis: {feat}")
             temp_opt = df[[feat, target_grade, 'Total_Count']].dropna()
             if len(temp_opt) > 0:
+                # Bin data
                 temp_opt['bin'] = pd.qcut(temp_opt[feat], q=12, duplicates='drop')
                 bin_res = temp_opt.groupby('bin', observed=True).agg({
                     target_grade: 'sum',
@@ -158,5 +162,33 @@ if uploaded_file is not None:
                 })
                 bin_res['Success_Rate'] = (bin_res[target_grade] / bin_res['Total_Count'] * 100).round(2)
                 bin_res['Mid'] = bin_res.index.map(lambda x: x.mid)
+
+                # Average success rate
                 avg_rate = bin_res['Success_Rate'].mean()
-                safe_bins = bin_res[bin_res['Success_Rate
+                safe_bins = bin_res[bin_res['Success_Rate'] > avg_rate]
+
+                if not safe_bins.empty:
+                    low_s, high_s = safe_bins.index[0].left, safe_bins.index[-1].right
+                    st.success(f"✅ Safe Operating Window for {feat}: {low_s:.1f} - {high_s:.1f}")
+                    st.info(f"Average probability of A-B+ in this window: {safe_bins['Success_Rate'].mean():.1f}%")
+
+                # Plot Success Probability Curve
+                fig_s, ax_s = plt.subplots(figsize=(12, 5))
+                ax_vol = ax_s.twinx()
+
+                # Production Volume (Bar)
+                sns.barplot(x=bin_res['Mid'].astype(float), y=bin_res['Total_Count'], 
+                            color='lightgray', ax=ax_vol, alpha=0.4)
+
+                # Success Rate (Line)
+                sns.lineplot(x=np.arange(len(bin_res)), y=bin_res['Success_Rate'], 
+                             marker='o', color='green', lw=3, ax=ax_s)
+
+                ax_s.set_ylabel("A-B+ Success Probability (%)", color='green', fontweight='bold')
+                ax_vol.set_ylabel("Total Production Volume", color='gray')
+                ax_s.set_ylim(0, 105)
+                ax_s.set_xticks(np.arange(len(bin_res)))
+                ax_s.set_xticklabels([f"{b.left:.1f}-{b.right:.1f}" for b in bin_res.index], rotation=45)
+                plt.title(f"Success Probability Curve for {feat}")
+                st.pyplot(fig_s)
+                st.markdown("---")
