@@ -3,12 +3,13 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
+import scipy.stats as stats
 
 # Cấu hình trang Dashboard
 st.set_page_config(page_title="QC Data Analysis Dashboard", layout="wide")
 
-st.title("📊 Hệ thống Phân tích Tương quan Cơ tính & Đề xuất Tiêu chuẩn QC")
-st.markdown("**Dự án:** Tối ưu hóa giới hạn kiểm soát (YS, TS, EL, YPE, HARDNESS) dựa trên đánh giá khách hàng.")
+st.title("📊 Hệ thống Phân tích Tương quan & Xác định Khoảng Cơ tính An toàn")
+st.markdown("---")
 
 # 1. Tải file Excel lên
 uploaded_file = st.file_uploader("Tải file Excel dữ liệu của bạn lên (Định dạng: .xlsx)", type=["xlsx"])
@@ -16,133 +17,142 @@ uploaded_file = st.file_uploader("Tải file Excel dữ liệu của bạn lên 
 if uploaded_file is not None:
     # Đọc dữ liệu
     df = pd.read_excel(uploaded_file)
-    
-    # Xóa khoảng trắng thừa trong tên cột (nếu có) để tránh lỗi
-    df.columns = df.columns.str.strip()
+    df.columns = df.columns.str.strip() # Xóa khoảng trắng thừa
     
     # 2. Tiền xử lý dữ liệu
-    # Tính tổng số lượng điểm đánh giá trên mỗi cuộn
     count_cols = ['A+B+數', 'A-B+數', 'A-B數', 'A-B-數', 'B+數']
-    
-    # Đảm bảo các cột này là số
     for col in count_cols:
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
         
     df['Total_Count'] = df[count_cols].sum(axis=1)
-    
-    # Lọc bỏ các dòng không có dữ liệu đánh giá
-    df = df[df['Total_Count'] > 0].copy()
+    df = df[df['Total_Count'] > 0].copy() # Lọc dữ liệu hợp lệ
     
     # Tính Điểm chất lượng (Thang 1-5)
-    df['Quality_Score'] = (5 * df['A+B+數'] + 
-                           4 * df['A-B+數'] + 
-                           3 * df['A-B數'] + 
-                           2 * df['A-B-數'] + 
-                           1 * df['B+數']) / df['Total_Count']
+    df['Quality_Score'] = (5 * df['A+B+數'] + 4 * df['A-B+數'] + 
+                           3 * df['A-B數'] + 2 * df['A-B-數'] + 1 * df['B+數']) / df['Total_Count']
 
-    # Tạo các Tab cho Dashboard
-    tab1, tab2, tab3 = st.tabs(["1. Tổng quan Tỉ lệ", "2. Phân tích Tương quan", "3. Đề xuất Tiêu chuẩn Mới"])
+    # Tạo 3 Tabs
+    tab1, tab2, tab3 = st.tabs(["1. Bảng Thống kê & Tỉ lệ", "2. Phân tích Tương quan", "3. Khoảng An toàn (Phân phối chuẩn)"])
 
-    # --- TAB 1: TỔNG QUAN ---
+    # --- TAB 1: THỐNG KÊ KẾT QUẢ ---
     with tab1:
-        st.header("Bức tranh Tổng thể về Chất lượng")
+        st.header("1. Thống kê Phân bổ Chất lượng theo Độ dày")
         
-        # Nhóm theo Độ dày (厚度歸類) và tính tổng các loại
-        summary_df = df.groupby('厚度歸類')[count_cols].sum()
+        # Tạo bảng thống kê tổng hợp
+        summary_df = df.groupby('厚度歸類')[count_cols].sum().reset_index()
+        summary_df['Tổng cuộn kiểm tra'] = summary_df[count_cols].sum(axis=1)
         
-        col1, col2 = st.columns(2)
+        # Tính % A+B+ để đưa vào bảng
+        summary_df['Tỉ lệ A+B+ (%)'] = (summary_df['A+B+數'] / summary_df['Tổng cuộn kiểm tra'] * 100).round(2)
         
-        for idx, thickness in enumerate(summary_df.index):
-            with col1 if idx % 2 == 0 else col2:
-                st.subheader(f"Độ dày: {thickness}")
-                data = summary_df.loc[thickness]
-                
-                # Vẽ biểu đồ tròn
-                fig, ax = plt.subplots(figsize=(6, 6))
-                ax.pie(data, labels=data.index, autopct='%1.1f%%', startangle=90, 
-                       colors=['#2ca02c', '#98df8a', '#ffbb78', '#ff9896', '#d62728'])
-                ax.axis('equal')
-                st.pyplot(fig)
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            st.subheader("Bảng số liệu tổng hợp")
+            st.dataframe(summary_df, use_container_width=True)
+            
+        with col2:
+            st.subheader("Biểu đồ tỉ lệ phần trăm")
+            # Trực quan hóa bằng Stacked Bar Chart cho gọn gàng
+            fig1, ax1 = plt.subplots(figsize=(8, 4))
+            summary_df.set_index('厚度歸類')[count_cols].apply(lambda x: x*100/sum(x), axis=1).plot(
+                kind='bar', stacked=True, ax=ax1, colormap='RdYlGn_r' # Xanh lá (Tốt) đến Đỏ (Kém)
+            )
+            ax1.set_ylabel("Tỉ lệ (%)")
+            ax1.set_xlabel("Độ dày (厚度歸類)")
+            plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+            st.pyplot(fig1)
 
-    # --- TAB 2: TƯƠNG QUAN ---
+    # --- TAB 2: MỐI TƯƠNG QUAN ---
     with tab2:
-        st.header("Mối tương quan giữa Cơ tính và Điểm Chất lượng")
-        st.markdown("Đường nét đứt màu đỏ thể hiện mốc chất lượng Tốt (Điểm 4.0 trở lên).")
-        
+        st.header("2. Mối tương quan giữa Cơ tính và Điểm Chất lượng")
         features = ['YS', 'TS', 'EL', 'YPE', 'HARDNESS']
         
-        # Tạo lưới biểu đồ
-        fig2, axes = plt.subplots(2, 3, figsize=(18, 10))
-        for i, feature in enumerate(features):
-            row, col = divmod(i, 3)
-            ax = axes[row, col]
+        col_corr1, col_corr2 = st.columns([1, 2])
+        
+        with col_corr1:
+            st.subheader("Bảng Hệ số Tương quan (Pearson)")
+            st.markdown("*(Hệ số càng gần 1 hoặc -1 thì tương quan càng mạnh)*")
+            # Tính toán ma trận tương quan chỉ cho các cột cần thiết
+            corr_matrix = df[['Quality_Score'] + features].corr()[['Quality_Score']].drop('Quality_Score')
+            corr_matrix.columns = ['Độ tương quan với Chất lượng']
             
-            # Scatter plot phân loại theo độ dày
-            sns.scatterplot(data=df, x=feature, y='Quality_Score', hue='厚度歸類', 
-                            palette='Set1', alpha=0.7, ax=ax)
+            # Tô màu bảng để sếp dễ nhìn (Xanh = Tương quan thuận, Đỏ = Tương quan nghịch)
+            st.dataframe(corr_matrix.style.background_gradient(cmap='coolwarm', axis=0), use_container_width=True)
             
-            ax.set_title(f'{feature} vs Điểm chất lượng')
-            ax.set_ylabel('Điểm chất lượng (1-5)')
-            ax.axhline(4.0, color='red', linestyle='--', alpha=0.5)
+        with col_corr2:
+            st.subheader("Biểu đồ Phân tán (Scatter Plot)")
+            selected_feature_corr = st.selectbox("Chọn thông số cơ tính để xem chi tiết biểu đồ:", features)
             
-        fig2.delaxes(axes[1, 2]) # Xóa ô trống
-        plt.tight_layout()
-        st.pyplot(fig2)
+            fig2, ax2 = plt.subplots(figsize=(8, 5))
+            sns.scatterplot(data=df, x=selected_feature_corr, y='Quality_Score', hue='厚度歸類', palette='Set1', alpha=0.8, ax=ax2)
+            ax2.axhline(4.0, color='red', linestyle='--', label='Ngưỡng An toàn (4.0 điểm)')
+            ax2.set_title(f"Tương quan giữa {selected_feature_corr} và Chất lượng")
+            ax2.set_ylabel("Điểm Chất lượng")
+            ax2.legend()
+            st.pyplot(fig2)
 
-    # --- TAB 3: ĐỀ XUẤT TIÊU CHUẨN (GIÁ TRỊ CỐT LÕI) ---
+    # --- TAB 3: KHOẢNG CƠ TÍNH AN TOÀN (PHÂN PHỐI CHUẨN) ---
     with tab3:
-        st.header("Đề xuất Giới hạn Kiểm soát Mới (Data-Driven)")
-        st.markdown("Thuật toán tự động trích xuất các cuộn thép **đạt điểm xuất sắc (> 4.5)**, sau đó tính toán dải phân vị từ 10% đến 90% để loại bỏ nhiễu, từ đó tìm ra **Vùng tiêu chuẩn vàng**.")
+        st.header("3. Xác định Khoảng Cơ tính An toàn (Dựa trên Phân phối chuẩn)")
         
-        # Chọn độ dày để phân tích
-        selected_thickness = st.selectbox("Chọn độ dày để phân tích tiêu chuẩn:", df['厚度歸類'].unique())
+        col_ctrl1, col_ctrl2 = st.columns([1, 3])
         
+        with col_ctrl1:
+            selected_thickness = st.selectbox("Lọc theo Độ dày:", df['厚度歸類'].unique())
+            selected_feature = st.selectbox("Chọn Thông số phân tích:", features)
+        
+        # Lọc dữ liệu theo độ dày và chỉ lấy những cuộn thép có chất lượng TỐT (Điểm >= 4.0)
         df_thick = df[df['厚度歸類'] == selected_thickness]
+        good_coils = df_thick[df_thick['Quality_Score'] >= 4.0][selected_feature].dropna()
         
-        # Lọc tập "Dữ liệu vàng" (Điểm chất lượng >= 4.5)
-        golden_df = df_thick[df_thick['Quality_Score'] >= 4.5]
-        
-        if len(golden_df) < 5:
-            st.warning(f"Không đủ dữ liệu cuộn thép xuất sắc cho độ dày {selected_thickness} để tính toán đề xuất (Cần ít nhất 5 cuộn).")
+        if len(good_coils) < 5:
+            st.warning("Không đủ dữ liệu cuộn thép đạt chuẩn để vẽ phân phối chuẩn.")
         else:
-            proposals = []
-            for feature in ['YS', 'TS', 'EL', 'YPE', 'HARDNESS']:
-                # Tính Phân vị 10 và 90
-                p10 = golden_df[feature].quantile(0.10)
-                p90 = golden_df[feature].quantile(0.90)
-                
-                proposals.append({
-                    "Thông số": feature,
-                    "Giới hạn dưới đề xuất (Min)": round(p10, 2),
-                    "Giới hạn trên đề xuất (Max)": round(p90, 2)
+            # Tính toán các thông số thống kê cho Phân phối chuẩn
+            mu, std = stats.norm.fit(good_coils) # Trung bình (Mean) và Độ lệch chuẩn (Std Dev)
+            
+            # Đề xuất khoảng an toàn: Từ (Mean - 1.5*Std) đến (Mean + 1.5*Std) bao phủ ~86% dữ liệu tốt
+            # Hoặc dùng Phân vị (Percentile 10 - 90) để linh hoạt hơn. Ở đây dùng Percentile cho thực tế nhà máy.
+            p10 = np.percentile(good_coils, 10)
+            p90 = np.percentile(good_coils, 90)
+            
+            with col_ctrl1:
+                st.markdown("### Bảng Đề xuất")
+                result_df = pd.DataFrame({
+                    "Chỉ số": [selected_feature],
+                    "Trung bình (μ)": [round(mu, 2)],
+                    "Giới hạn Dưới (Min)": [round(p10, 2)],
+                    "Giới hạn Trên (Max)": [round(p90, 2)]
                 })
+                st.dataframe(result_df.set_index("Chỉ số"))
+                st.success(f"**Kết luận:** Để đạt chất lượng tốt đối với thép {selected_thickness}, hãy kiểm soát {selected_feature} trong khoảng từ **{round(p10, 2)} đến {round(p90, 2)}**.")
+
+            with col_ctrl2:
+                # Vẽ biểu đồ Phân phối chuẩn (Bell Curve)
+                fig3, ax3 = plt.subplots(figsize=(10, 6))
                 
-            proposal_df = pd.DataFrame(proposals)
-            
-            st.subheader(f"Bảng Ma Trận Tiêu Chuẩn Mới cho thép {selected_thickness}")
-            st.dataframe(proposal_df, use_container_width=True)
-            
-            # Trực quan hóa sự phân bố của 1 thông số cụ thể
-            st.markdown("---")
-            st.subheader("Biểu đồ Phân bố so sánh (Trực quan hóa cho sếp)")
-            feature_to_plot = st.selectbox("Chọn thông số để xem phân bố:", ['YS', 'TS', 'EL', 'YPE', 'HARDNESS'])
-            
-            fig3, ax3 = plt.subplots(figsize=(10, 5))
-            
-            # Vẽ phân bố của Hàng Tốt và Hàng Kém
-            sns.kdeplot(data=df_thick[df_thick['Quality_Score'] >= 4.0], x=feature_to_plot, fill=True, label="Nhóm Tốt (Đạt)", color="green", ax=ax3)
-            sns.kdeplot(data=df_thick[df_thick['Quality_Score'] < 4.0], x=feature_to_plot, fill=True, label="Nhóm Kém (Bị phàn nàn)", color="red", ax=ax3)
-            
-            # Vẽ đường ranh giới mới đề xuất
-            min_prop = proposal_df[proposal_df['Thông số'] == feature_to_plot]['Giới hạn dưới đề xuất (Min)'].values[0]
-            max_prop = proposal_df[proposal_df['Thông số'] == feature_to_plot]['Giới hạn trên đề xuất (Max)'].values[0]
-            
-            ax3.axvline(min_prop, color='blue', linestyle='--', linewidth=2, label=f'Đề xuất Min ({min_prop})')
-            ax3.axvline(max_prop, color='blue', linestyle='--', linewidth=2, label=f'Đề xuất Max ({max_prop})')
-            
-            ax3.set_title(f"Phân bố {feature_to_plot} thực tế và Vùng đề xuất (Màu xanh dương)")
-            ax3.legend()
-            st.pyplot(fig3)
+                # 1. Vẽ Histogram thực tế của các cuộn đạt chất lượng
+                sns.histplot(good_coils, bins=15, stat='density', alpha=0.5, color='green', label='Dữ liệu thực tế (Các cuộn đạt chuẩn)', ax=ax3)
+                
+                # 2. Vẽ đường cong Phân phối chuẩn toán học (Bell Curve)
+                xmin, xmax = ax3.get_xlim()
+                x_axis = np.linspace(xmin, xmax, 100)
+                p = stats.norm.pdf(x_axis, mu, std)
+                ax3.plot(x_axis, p, 'k', linewidth=2, label=f'Đường cong Phân phối chuẩn\n(μ={mu:.1f}, σ={std:.1f})')
+                
+                # 3. Kẻ vạch Khoảng an toàn đề xuất
+                ax3.axvline(p10, color='blue', linestyle='--', linewidth=2.5, label=f'Giới hạn Dưới ({p10:.1f})')
+                ax3.axvline(p90, color='red', linestyle='--', linewidth=2.5, label=f'Giới hạn Trên ({p90:.1f})')
+                
+                # Tô màu vùng an toàn
+                ax3.fill_between(x_axis, p, where=((x_axis >= p10) & (x_axis <= p90)), color='yellow', alpha=0.3, label='Vùng Cơ tính An toàn')
+                
+                ax3.set_title(f"Biểu đồ Phân phối chuẩn của {selected_feature} (Thép {selected_thickness} - Hàng Đạt)")
+                ax3.set_xlabel(f"Giá trị {selected_feature}")
+                ax3.set_ylabel("Mật độ phân phối (Density)")
+                ax3.legend(loc='upper right')
+                
+                st.pyplot(fig3)
 
 else:
-    st.info("Vui lòng upload file Excel (có chứa các cột như: 使用日期, 鋼捲號碼, 厚度歸類, YS, TS, A+B+數,...) để bắt đầu phân tích.")
+    st.info("👆 Vui lòng tải file Excel dữ liệu của bạn ở thanh công cụ phía trên để bắt đầu hệ thống tự động phân tích.")
