@@ -4,11 +4,11 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
 import scipy.stats as stats
-import io # ĐÃ THÊM: Bắt buộc phải có để tải file Excel
+import io
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="QC Mechanical Properties Dashboard", layout="wide")
-st.title("📊 QC Mechanical Properties Analysis")
+st.title("📊 Quality Yield & Mechanical Properties Optimization")
 st.markdown("---")
 
 # --- 1. FILE UPLOAD ---
@@ -16,231 +16,183 @@ uploaded_file = st.file_uploader("Upload Excel file (.xlsx)", type=["xlsx"])
 
 if uploaded_file is not None:
     df = pd.read_excel(uploaded_file)
-    df.columns = df.columns.str.strip()  # remove extra spaces
+    df.columns = df.columns.str.strip()
+
+    # Store charts for Excel export
+    exported_figures = {}
 
     # --- 2. DATA PREPROCESSING ---
+    # Primary columns for quality grades
     count_cols = ['A+B+數', 'A-B+數', 'A-B數', 'A-B-數', 'B+數']
     count_cols = [col for col in count_cols if col in df.columns]
     
     for col in count_cols:
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
+    # Mechanical properties columns
     mech_features = ['YS', 'TS', 'EL', 'YPE', 'HARDNESS']
     mech_features = [feat for feat in mech_features if feat in df.columns]
     
     for feat in mech_features:
         df[feat] = pd.to_numeric(df[feat], errors='coerce')
+        # Clean data: remove invalid 0 or negative values
         df.loc[df[feat] <= 0, feat] = np.nan
 
     df['Total_Count'] = df[count_cols].sum(axis=1)
     df = df[df['Total_Count'] > 0].copy()
 
-    # --- QUALITY SCORE ---
+    # Calculate Overall Quality Score
     df['Quality_Score'] = (5*df.get('A+B+數', 0) + 4*df.get('A-B+數', 0) + 3*df.get('A-B數', 0) +
                            2*df.get('A-B-數', 0) + 1*df.get('B+數', 0)) / df['Total_Count']
 
     # --- TABS ---
     tab1, tab2, tab3, tab4 = st.tabs([
-        "1. Summary & Percentages",
-        "2. Correlation Matrix",
-        "3. Weighted Distribution",
-        "4. Optimal & Safe Limits"
+        "1. Statistics & Pie Charts",
+        "2. Correlation Analysis",
+        "3. Distribution & Thickness",
+        "4. Yield Rate Optimization (Target Finding)"
     ])
 
     # --- TAB 1: SUMMARY ---
     with tab1:
-        st.header("1. Summary by Thickness")
+        st.header("1. Quality Summary by Thickness")
         summary_df = df.groupby('厚度歸類')[count_cols].sum().reset_index()
         summary_df['Total Coils'] = summary_df[count_cols].sum(axis=1)
         
         for col in count_cols:
-            summary_df[f"% {col}"] = (summary_df[col]/summary_df['Total Coils']*100).round(2)
+            summary_df[f'% {col}'] = (summary_df[col]/summary_df['Total Coils']*100).round(2)
             
         col1, col2 = st.columns([1.5, 1])
         with col1:
-            st.subheader("Summary Table")
+            st.subheader("Data Table (English Headings)")
             display_df = summary_df.copy()
-            display_df.rename(columns={'厚度歸類': 'Thickness'}, inplace=True)
+            # Mapping to English for professional view
+            en_cols = {'厚度歸類': 'Thickness', 'A+B+數': 'Count A+B+', 'A-B+數': 'Count A-B+', 
+                       'A-B數': 'Count A-B', 'A-B-數': 'Count A-B-', 'B+數': 'Count B+'}
+            display_df.rename(columns=en_cols, inplace=True)
             st.dataframe(display_df, use_container_width=True)
 
-            # Download button (Đã được cấp quyền bởi lệnh import io)
-            towrite = io.BytesIO()
-            display_df.to_excel(towrite, index=False, engine='openpyxl')
-            towrite.seek(0)
-            st.download_button("📥 Download Excel", data=towrite, file_name="Summary_QC.xlsx")
-
         with col2:
-            st.subheader("Percentage Pie Charts")
+            st.subheader("Quality Distribution (Pie)")
             plot_df = summary_df.set_index('厚度歸類')[count_cols]
             plot_df.columns = ['A+B+', 'A-B+', 'A-B', 'A-B-', 'B+']
             pie_colors = ['#2ca02c', '#1f77b4', '#ff7f0e', '#9467bd', '#d62728']
 
-            thicknesses = plot_df.index
-            n_pies = len(thicknesses)
-            
+            n_pies = len(plot_df)
             if n_pies > 0:
-                n_cols_pie = min(2, n_pies)
-                n_rows_pie = (n_pies + n_cols_pie - 1) // n_cols_pie
-
-                fig1, axes1 = plt.subplots(n_rows_pie, n_cols_pie, figsize=(14, 7 * n_rows_pie))
-                axes1_flat = np.array(axes1).flatten() if n_pies > 1 else [axes1]
-
-                for i, thick in enumerate(thicknesses):
-                    ax = axes1_flat[i]
+                fig1, axes1 = plt.subplots((n_pies+1)//2, min(2, n_pies), figsize=(14, 6 * ((n_pies+1)//2)))
+                axes_flat = np.array(axes1).flatten() if n_pies > 1 else [axes1]
+                for i, thick in enumerate(plot_df.index):
                     data = plot_df.loc[thick]
                     mask = data > 0
-                    if mask.any():
-                        ax.pie(data[mask], autopct=lambda p: f'{p:.1f}%' if p>3 else '', startangle=90, 
-                               colors=[c for c,m in zip(pie_colors, mask) if m], 
-                               wedgeprops={'edgecolor':'white','linewidth':2}, 
-                               textprops={'fontsize':14,'fontweight':'bold'})
-                    ax.set_title(f"Thickness: {thick}", fontsize=18, fontweight='bold')
-
-                for j in range(i+1, len(axes1_flat)):
-                    axes1_flat[j].axis('off')
-
-                fig1.legend(plot_df.columns, title="Quality Grade", bbox_to_anchor=(1.0,0.5), loc="center left", fontsize=14, title_fontsize=16)
-                plt.tight_layout()
-                st.pyplot(fig1, use_container_width=True)
+                    axes_flat[i].pie(data[mask], labels=None, autopct=lambda p: f'{p:.1f}%' if p>3 else '', 
+                                     startangle=90, colors=[c for c,m in zip(pie_colors, mask) if m],
+                                     wedgeprops={'edgecolor':'white','linewidth':2}, textprops={'fontsize':12, 'fontweight':'bold'})
+                    axes_flat[i].set_title(f"Thickness: {thick}", fontsize=14, fontweight='bold')
+                for j in range(i+1, len(axes_flat)): axes_flat[j].axis('off')
+                fig1.legend(plot_df.columns, title="Quality Grade", loc="center right", fontsize=12)
+                st.pyplot(fig1)
+                exported_figures['Quality_Pie'] = fig1
 
     # --- TAB 2: CORRELATION ---
     with tab2:
-        st.header("2. Correlation Matrix")
+        st.header("2. Mechanical Property Correlation")
         corr_matrix = df[['Quality_Score'] + mech_features].corr()[['Quality_Score']].drop('Quality_Score')
-        corr_matrix.columns = ['Correlation with Quality Score']
-        st.dataframe(corr_matrix.style.background_gradient(cmap='coolwarm', axis=0), use_container_width=True)
+        corr_matrix.columns = ['Correlation with Quality']
+        st.dataframe(corr_matrix.style.background_gradient(cmap='coolwarm'), use_container_width=True)
+        st.info("💡 Negative correlation means higher property values may reduce the quality score.")
 
-    # --- TAB 4: OPTIMAL & SAFE LIMITS (Tính trước để vẽ ở Tab 3) ---
-    with tab4:
-        st.header("4. Optimal & Safe Limits")
-        limits = []
-        for feat in mech_features:
-            # --- Optimal Limit by percentile ---
-            all_vals = []
-            for grade_col in count_cols:
-                temp = df[[feat, grade_col]].dropna()
-                temp = temp[temp[grade_col]>0]
-                if len(temp)>0:
-                    vals = temp[feat].values
-                    wgts = temp[grade_col].values
-                    all_vals.extend(np.repeat(vals, wgts.astype(int)))
-                    
-            if len(all_vals) > 10:
-                lower_opt = np.percentile(all_vals, 2.5)
-                upper_opt = np.percentile(all_vals, 97.5)
-            else:
-                lower_opt, upper_opt = np.nan, np.nan
-
-            # --- Safe Limit from weighted mean/std of good grades only ---
-            all_good_vals = []
-            for grade_col in ['A+B+數','A-B+數']:
-                if grade_col in df.columns:
-                    temp = df[[feat, grade_col]].dropna()
-                    temp = temp[temp[grade_col]>0]
-                    if len(temp)>0:
-                        vals = temp[feat].values
-                        wgts = temp[grade_col].values
-                        all_good_vals.extend(np.repeat(vals, wgts.astype(int)))
-                        
-            if len(all_good_vals) > 5:
-                w_mean = np.average(all_good_vals)
-                w_std = np.std(all_good_vals)
-                lower_safe = w_mean - 2*w_std
-                upper_safe = w_mean + 2*w_std
-            else:
-                lower_safe, upper_safe = np.nan, np.nan
-
-            limits.append([feat, lower_opt, upper_opt, lower_safe, upper_safe])
-
-        limits_df = pd.DataFrame(limits, columns=['Parameter', 'Optimal Lower','Optimal Upper', 'Safe Lower','Safe Upper'])
-        st.dataframe(limits_df, use_container_width=True)
-
-    # --- TAB 3: WEIGHTED DISTRIBUTION WITH LIMITS ---
+    # --- TAB 3: DISTRIBUTION BY THICKNESS ---
     with tab3:
-        st.header("3. Weighted Distribution by Thickness with Limits")
-        grade_mapping = {
-            'A+B+ (Excellent)': 'A+B+數',
-            'A-B+ (Good)': 'A-B+數',
-            'A-B (Average)': 'A-B數',
-            'A-B- (Poor)': 'A-B-數',
-            'B+ (Reject)': 'B+數'
-        }
-        colors = ['#2ca02c','#1f77b4','#ff7f0e','#9467bd','#d62728']
+        st.header("3. Distribution with Normal Curves")
         thickness_list = sorted(df['厚度歸類'].dropna().unique(), key=str)
+        grade_labels = ['A+B+', 'A-B+', 'A-B', 'A-B-', 'B+']
+        colors = ['#2ca02c', '#1f77b4', '#ff7f0e', '#9467bd', '#d62728']
 
-        # Dictionary of limits
-        limits_dict = {row['Parameter']:(row['Optimal Lower'],row['Optimal Upper'],row['Safe Lower'],row['Safe Upper'])
-                       for idx,row in limits_df.iterrows()}
-
-        for feature in mech_features:
-            with st.expander(f"📊 Distribution: {feature}", expanded=True):
-                if len(thickness_list) == 0:
-                    continue
-                    
+        for feat in mech_features:
+            with st.expander(f"View {feat} Distribution Charts", expanded=False):
                 fig, axes = plt.subplots(len(thickness_list), 1, figsize=(16, 6*len(thickness_list)))
-                axes = axes if len(thickness_list)>1 else [axes]
+                axes = axes if len(thickness_list) > 1 else [axes]
+                for i, thick in enumerate(thickness_list):
+                    df_t = df[df['厚度歸類'] == thick]
+                    for col, label, color in zip(count_cols, grade_labels, colors):
+                        temp = df_t[[feat, col]].dropna()
+                        temp = temp[temp[col] > 0]
+                        if len(temp) > 2:
+                            sns.histplot(temp, x=feat, weights=col, label=label, color=color, 
+                                         bins=20, stat='count', alpha=0.3, ax=axes[i], kde=False)
+                            # Normal curve overlay
+                            m, s = np.average(temp[feat], weights=temp[col]), np.sqrt(np.average((temp[feat]-np.average(temp[feat], weights=temp[col]))**2, weights=temp[col]))
+                            if s > 0:
+                                x = np.linspace(temp[feat].min(), temp[feat].max(), 100)
+                                axes[i].plot(x, stats.norm.pdf(x, m, s) * temp[col].sum() * ((temp[feat].max()-temp[feat].min())/20), color=color, lw=2)
+                    axes[i].set_title(f"Thickness: {thick} - {feat}")
+                    axes[i].legend()
+                st.pyplot(fig)
+                exported_figures[f'{feat}_Dist'] = fig
 
-                for i, thickness in enumerate(thickness_list):
-                    ax = axes[i]
-                    df_thick = df[df['厚度歸類']==thickness]
-                    has_data = False
+    # --- TAB 4: YIELD OPTIMIZATION (THE "SWEET SPOT") ---
+    with tab4:
+        st.header("4. Finding the Optimal Property Range")
+        st.markdown("This analysis shows the **Yield Rate** of high-quality grades (A+B+ and A-B+) at different property levels.")
+        
+        target_grade_cols = ['A+B+數', 'A-B+數'] # Define what is "High Quality"
+        
+        for feat in mech_features:
+            st.subheader(f"Optimal Range for {feat}")
+            
+            # 1. Prepare binned data
+            temp_opt = df[[feat] + count_cols].dropna()
+            # Dynamic binning
+            bins = np.histogram_bin_edges(temp_opt[feat], bins=15)
+            temp_opt['bin'] = pd.cut(temp_opt[feat], bins=bins)
+            
+            # 2. Aggregate counts per bin
+            bin_summary = temp_opt.groupby('bin', observed=True)[count_cols].sum()
+            bin_summary['Total'] = bin_summary.sum(axis=1)
+            bin_summary['Good_Yield_%'] = (bin_summary[target_grade_cols].sum(axis=1) / bin_summary['Total'] * 100).fillna(0)
+            bin_summary['Bin_Center'] = bin_summary.index.map(lambda x: x.mid)
+            
+            # 3. Plot Yield Curve
+            fig_yield, ax_yield = plt.subplots(figsize=(14, 6))
+            ax2 = ax_yield.twinx()
+            
+            # Bar chart for volume
+            sns.barplot(x=bin_summary['Bin_Center'].astype(str), y=bin_summary['Total'], color='lightgray', ax=ax_yield, alpha=0.5, label='Production Volume')
+            # Line chart for Yield %
+            sns.lineplot(x=np.arange(len(bin_summary)), y=bin_summary['Good_Yield_%'], marker='o', color='green', linewidth=3, ax=ax2, label='A+B+ & A-B+ Yield %')
+            
+            ax_yield.set_ylabel("Total Coils (Volume)")
+            ax2.set_ylabel("High Quality Yield Rate (%)")
+            ax2.set_ylim(0, 105)
+            ax_yield.set_xticklabels([f"{b.left:.1f}-{b.right:.1f}" for b in bin_summary.index], rotation=45)
+            plt.title(f"Yield Rate Curve: How {feat} affects Quality")
+            
+            # Identify the "Sweet Spot" (Bins with > 90% Yield)
+            sweet_spot = bin_summary[bin_summary['Good_Yield_%'] >= 85]
+            if not sweet_spot.empty:
+                st.success(f"✅ **Sweet Spot detected for {feat}:** Quality is highest between **{sweet_spot.index[0].left:.1f}** and **{sweet_spot.index[-1].right:.1f}**")
+            
+            st.pyplot(fig_yield)
+            exported_figures[f'{feat}_Yield_Curve'] = fig_yield
 
-                    for (grade_label, grade_col), color in zip(grade_mapping.items(), colors):
-                        if grade_col not in df_thick.columns:
-                            continue
-                        temp_df = df_thick[[feature, grade_col]].dropna()
-                        temp_df = temp_df[temp_df[grade_col]>0]
-                        if len(temp_df) > 3:
-                            has_data = True
-                            values = temp_df[feature].values
-                            weights = temp_df[grade_col].values
-                            total_weight = weights.sum()
-                            
-                            sns.histplot(temp_df, x=feature, weights=grade_col, label=grade_label,
-                                         color=color, bins=20, kde=False, stat='count', alpha=0.3, ax=ax)
-
-                            # Weighted distribution line
-                            weighted_mean = np.average(values, weights=weights)
-                            weighted_std = np.sqrt(np.average((values-weighted_mean)**2, weights=weights))
-                            
-                            if weighted_std > 0:
-                                x_axis = np.linspace(values.min(), values.max(), 150)
-                                pdf = stats.norm.pdf(x_axis, weighted_mean, weighted_std)
-                                # ĐÃ SỬA: Chống lỗi values.max() == values.min() làm triệt tiêu đường cong
-                                val_range = max(values.max() - values.min(), 1)
-                                scaled_pdf = pdf * total_weight * (val_range / 20)
-                                ax.plot(x_axis, scaled_pdf, color=color, linewidth=2, alpha=0.8)
-                                
-                            ax.axvline(weighted_mean, color=color, linestyle='--', linewidth=1, alpha=0.8)
-
-                    # Draw limits
-                    if feature in limits_dict:
-                        opt_lower, opt_upper, safe_lower, safe_upper = limits_dict[feature]
-                        if not np.isnan(opt_lower):
-                            ax.axvline(opt_lower, color='blue', linestyle='-.', linewidth=2.5, label='Optimal Lower')
-                        if not np.isnan(opt_upper):
-                            ax.axvline(opt_upper, color='blue', linestyle='-.', linewidth=2.5, label='Optimal Upper')
-                        if not np.isnan(safe_lower):
-                            ax.axvline(safe_lower, color='green', linestyle='-', linewidth=2.5, label='Safe Lower')
-                        if not np.isnan(safe_upper):
-                            ax.axvline(safe_upper, color='green', linestyle='-', linewidth=2.5, label='Safe Upper')
-
-                    if not has_data:
-                        ax.set_title(f"Thickness: {thickness} - Not enough data", color='gray')
-                        ax.axis('off')
-                    else:
-                        ax.set_title(f"Thickness: {thickness}")
-                        ax.set_xlabel(feature)
-                        ax.set_ylabel("Number of Coils")
-                        ax.grid(axis='y', linestyle=':', alpha=0.7)
-                        
-                        # ĐÃ SỬA LỖI LẶP LEGEND: Gộp các chú thích bị trùng lặp
-                        handles, labels = ax.get_legend_handles_labels()
-                        by_label = dict(zip(labels, handles))
-                        ax.legend(by_label.values(), by_label.keys(), title="Grade / Limit", loc='upper right')
-
-                plt.tight_layout()
-                st.pyplot(fig, use_container_width=True)
+    # --- EXPORT REPORT ---
+    st.markdown("---")
+    if st.button("Generate Full Excel Report"):
+        buf = io.BytesIO()
+        with pd.ExcelWriter(buf, engine='xlsxwriter') as writer:
+            summary_df.to_excel(writer, sheet_name='Summary_Data', index=False)
+            # Add images to a specific sheet
+            workbook = writer.book
+            img_sheet = workbook.add_worksheet('Charts_Report')
+            row = 0
+            for name, f in exported_figures.items():
+                img_data = io.BytesIO()
+                f.savefig(img_data, format='png')
+                img_sheet.write(row, 0, name)
+                img_sheet.insert_image(row+1, 0, name, {'image_data': img_data, 'x_scale': 0.5, 'y_scale': 0.5})
+                row += 35
+        st.download_button("📥 Download Full Report", buf.getvalue(), "QC_Full_Report.xlsx", "application/vnd.ms-excel")
 
 else:
-    st.info("Please upload an Excel file to start analysis.")
+    st.info("Please upload an Excel file to begin.")
