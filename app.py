@@ -114,9 +114,11 @@ if uploaded_file is not None:
         st.markdown("""
         This section compares the **measured mechanical properties** with the 
         **safe zone values (mean - 2σ)** and the **specification limits**, 
-        separated by thickness category.
+        separated by thickness category. Control limits are proposed narrower 
+        than spec limits to ensure quality safety.
         """)
 
+        # Specification limits
         spec_limits = {
             "YS": (405, 500),
             "TS": (415, 550),
@@ -136,16 +138,29 @@ if uploaded_file is not None:
                 std_val = df_t[feat].std(skipna=True)
                 safe_val = mean_val - 2*std_val if pd.notnull(std_val) else np.nan
                 low, high = spec_limits.get(feat, (None, None))
+
+                # Propose narrower control limits (5% margin inside spec)
+                if low is not None and high is not None:
+                    ctrl_low = low + 0.05*(high-low)
+                    ctrl_high = high - 0.05*(high-low)
+                    ctrl_limit = f"{round(ctrl_low,2)}–{round(ctrl_high,2)}"
+                elif low is not None:
+                    ctrl_limit = f">={low+ (0.05*low):.2f}"
+                else:
+                    ctrl_limit = "N/A"
+
                 status = "✅ Safe"
                 if low is not None and safe_val < low:
                     status = "⚠ Risk (below limit)"
                 if high is not None and safe_val > high:
                     status = "⚠ Risk (above limit)"
+
                 status_list.append({
                     "Feature": feat,
                     "Measured Mean": round(mean_val, 2),
                     "Safe Zone (Mean - 2σ)": round(safe_val, 2),
                     "Spec Limit": f"{low}–{high}" if high else f">={low}",
+                    "Proposed Control Limit": ctrl_limit,
                     "Status": status
                 })
 
@@ -174,29 +189,22 @@ if uploaded_file is not None:
                         st.success(f"✅ Safe Operating Window for {feat}: {low_s:.1f} - {high_s:.1f}")
                         st.info(f"Average probability of A-B+ in this window: {safe_bins['Success_Rate'].mean():.1f}%")
 
-                # Plot Combined Success Probability Curve
-                fig_s, ax_s = plt.subplots(figsize=(12, 5))
+                    # Combined Plot (Bar + Line)
+                    fig_s, ax_s = plt.subplots(figsize=(12, 5))
+                    ax_s.bar(bin_res['Mid'].astype(float), bin_res['Total_Count'], 
+                             color='lightgray', alpha=0.5, label="Production Volume")
+                    ax_s2 = ax_s.twinx()
+                    ax_s2.plot(bin_res['Mid'].astype(float), bin_res['Success_Rate'], 
+                               marker='o', color='green', lw=2.5, label="Success Probability")
 
-                # Production Volume (Bar)
-                ax_s.bar(bin_res['Mid'].astype(float), bin_res['Total_Count'], 
-                         color='lightgray', alpha=0.5, label="Production Volume")
+                    ax_s.set_xlabel(f"{feat} Range")
+                    ax_s.set_ylabel("Total Production Volume", color='gray')
+                    ax_s2.set_ylabel("A-B+ Success Probability (%)", color='green')
+                    ax_s2.set_ylim(0, 105)
 
-                # Success Rate (Line)
-                ax_s2 = ax_s.twinx()
-                ax_s2.plot(bin_res['Mid'].astype(float), bin_res['Success_Rate'], 
-                           marker='o', color='green', lw=2.5, label="Success Probability")
+                    plt.title(f"Combined Success Probability Curve for {feat} (Thickness {thick})")
+                    ax_s.legend(loc="upper left")
+                    ax_s2.legend(loc="upper right")
 
-                # Labels
-                ax_s.set_xlabel(f"{feat} Range")
-                ax_s.set_ylabel("Total Production Volume", color='gray')
-                ax_s2.set_ylabel("A-B+ Success Probability (%)", color='green')
-                ax_s2.set_ylim(0, 105)
-
-                plt.title(f"Combined Success Probability Curve for {feat} (Thickness {thick})")
-
-                # Legends
-                ax_s.legend(loc="upper left")
-                ax_s2.legend(loc="upper right")
-
-                st.pyplot(fig_s)
-                st.markdown("---")
+                    st.pyplot(fig_s)
+                    st.markdown("---")
