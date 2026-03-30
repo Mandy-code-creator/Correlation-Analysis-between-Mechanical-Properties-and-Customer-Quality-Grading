@@ -61,16 +61,17 @@ if uploaded_file is not None:
         for col in count_cols:
             summary_df[f'% {col}'] = (summary_df[col] / summary_df['Total Coils'] * 100).round(2)
 
+        # Rename column for consistency
+        summary_df.rename(columns={'厚度歸類': 'Thickness'}, inplace=True)
+
         col1, col2 = st.columns([1.5, 1])
         with col1:
             st.subheader("Summary Table")
-            display_df = summary_df.copy()
-            display_df.rename(columns={'厚度歸類': 'Thickness'}, inplace=True)
-            st.dataframe(display_df, use_container_width=True)
+            st.dataframe(summary_df, use_container_width=True)
 
             # Download button
             towrite = io.BytesIO()
-            display_df.to_excel(towrite, index=False, engine='openpyxl')
+            summary_df.to_excel(towrite, index=False, engine='openpyxl')
             towrite.seek(0)
             st.download_button("📥 Download Excel", data=towrite, file_name="Summary_QC.xlsx")
 
