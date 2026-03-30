@@ -39,7 +39,7 @@ if uploaded_file is not None:
     df['Total_Count'] = df[count_cols].sum(axis=1)
     df = df[df['Total_Count'] > 0].copy()
 
-    # --- 3. CREATE TABS (OPTIMIZED TO 3 TABS) ---
+    # --- 3. CREATE TABS ---
     tab1, tab2, tab3 = st.tabs([
         "1. Summary & Yields", 
         "2. Distribution Analysis (Parallel View)",
@@ -53,16 +53,13 @@ if uploaded_file is not None:
         summary_df['Total Coils'] = summary_df[count_cols].sum(axis=1)
         
         for col in count_cols:
-            # Làm tròn % thành số nguyên
             summary_df[f"% {col}"] = (summary_df[col] / summary_df['Total Coils'] * 100).fillna(0).round(0).astype(int)
             
         display_df = summary_df.copy()
         display_df.rename(columns={'厚度歸類': 'Thickness'}, inplace=True)
-        
-        # Thêm STT
         display_df.insert(0, 'STT', range(1, len(display_df) + 1))
         
-        # Ép kiểu int cho các cột count để xóa đuôi .0
+        # Chuyển các cột đếm về số nguyên
         cols_to_int = count_cols + ['Total Coils']
         for c in cols_to_int:
             if c in display_df.columns:
@@ -155,10 +152,7 @@ if uploaded_file is not None:
         sigma_factor = st.radio("Select Sigma Factor", [2.0, 2.5, 3.0], index=0)
 
         spec_limits = {
-            "YS": (405, 500),
-            "TS": (415, 550),
-            "EL": (25, None),
-            "YPE": (4, None)
+            "YS": (405, 500), "TS": (415, 550), "EL": (25, None), "YPE": (4, None)
         }
 
         thickness_list = sorted(df['厚度歸類'].dropna().unique(), key=str)
@@ -171,9 +165,9 @@ if uploaded_file is not None:
             status_list = []
             for feat in mech_features:
                 vals = df_t[feat].dropna().values
-                if len(vals) == 0:
-                    continue
+                if len(vals) == 0: continue
 
+                # Loại bỏ ngoại lai 3σ
                 mean_val = np.mean(vals)
                 std_val = np.std(vals, ddof=1)
                 vals_clean = vals[(vals >= mean_val-3*std_val) & (vals <= mean_val+3*std_val)]
@@ -183,6 +177,7 @@ if uploaded_file is not None:
                 safe_val = mean_val - sigma_factor*std_val
                 low, high = spec_limits.get(feat, (None, None))
 
+                # Chốt giới hạn số nguyên
                 if low is not None and high is not None:
                     spec_str = f"{int(low)}–{int(high)}"
                     ctrl_low = int(round(low + 0.05*(high-low)))
@@ -190,7 +185,7 @@ if uploaded_file is not None:
                     ctrl_limit = f"{ctrl_low}–{ctrl_high}"
                 elif low is not None:
                     spec_str = f">={int(low)}"
-                    ctrl_limit = f">={int(round(low+ (0.05*low)))}"
+                    ctrl_limit = f">={int(round(low + (0.05*low)))}"
                 else:
                     spec_str = "N/A"
                     ctrl_limit = "N/A"
@@ -199,22 +194,7 @@ if uploaded_file is not None:
                 LCL_I = mean_val - sigma_factor*std_val
                 ctrl_imr = f"{int(round(LCL_I))}–{int(round(UCL_I))}"
 
-                target_grade = 'A-B+數'
-                temp_opt = df_t[[feat, target_grade, 'Total_Count']].dropna()
-                success_prob = None
-                if len(temp_opt) > 0:
-                    temp_opt['bin'] = pd.qcut(temp_opt[feat], q=12, duplicates='drop')
-                    bin_res = temp_opt.groupby('bin', observed=True).agg({
-                        target_grade: 'sum',
-                        'Total_Count': 'sum'
-                    })
-                    bin_res['Success_Rate'] = (bin_res[target_grade] / bin_res['Total_Count'] * 100).fillna(0).round(0).astype(int)
-                    bin_res['Mid'] = bin_res.index.map(lambda x: x.mid).astype(float)
-
-                    bins_in_ctrl = bin_res[(bin_res['Mid'] >= LCL_I) & (bin_res['Mid'] <= UCL_I)]
-                    if not bins_in_ctrl.empty:
-                        success_prob = bins_in_ctrl['Success_Rate'].mean()
-
+                # Segment Distribution
                 seg_A_Bplusplus = df_t['A+B+數'].sum()
                 seg_A_Bplus = df_t['A-B+數'].sum()
                 seg_A_B = df_t['A-B數'].sum()
@@ -233,22 +213,14 @@ if uploaded_file is not None:
                 else:
                     seg_dist = "N/A"
 
-                if success_prob is not None:
-                    if success_prob >= 70 and seg_total > 0 and (seg_A_Bplusplus+seg_A_Bplus)/seg_total >= 0.75:
-                        exp_quality = "A-B+"
-                    elif success_prob >= 40:
-                        exp_quality = "A-B"
-                    else:
-                        exp_quality = "B or lower"
-                else:
-                    exp_quality = "Unknown"
-
+                # Logic đánh giá Risk
                 status = "✅ Safe"
                 if low is not None and safe_val < low:
                     status = "⚠ Risk (below limit)"
                 if high is not None and safe_val > high:
                     status = "⚠ Risk (above limit)"
 
+                # Cấu hình dữ liệu hiển thị (ĐÃ XÓA CỘT XÁC SUẤT)
                 row_data = {
                     "Thickness": thick,
                     "Feature": feat,
@@ -257,97 +229,71 @@ if uploaded_file is not None:
                     "Spec Limit": spec_str,
                     "Proposed Control Limit": ctrl_limit,
                     "I-MR Control Limit": ctrl_imr,
-                    "Success Probability in Control Zone (%)": int(round(success_prob)) if success_prob is not None else "N/A",
                     "Segment Distribution": seg_dist,
-                    "Expected Quality Level": exp_quality,
                     "Status": status
                 }
                 
                 status_list.append(row_data)
                 all_export_data.append(row_data)
 
-            display_status_df = pd.DataFrame(status_list)
-            if not display_status_df.empty:
-                display_status_df = display_status_df.drop(columns=['Thickness'])
-            st.dataframe(display_status_df, use_container_width=True, hide_index=True)
+            display_df_3 = pd.DataFrame(status_list)
+            if not display_df_3.empty:
+                display_df_3 = display_df_3.drop(columns=['Thickness'])
+            st.dataframe(display_df_3, use_container_width=True, hide_index=True)
 
             # --- I-MR Chart ---
             for feat in mech_features:
                 st.markdown(f"### I-MR Chart: {feat}")
-                vals = df_t[feat].dropna().values
-                if len(vals) > 1:
+                v = df_t[feat].dropna().values
+                if len(v) > 1:
                     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 6))
-                    mean_val = np.mean(vals)
-                    std_val = np.std(vals, ddof=1)
-                    UCL_I = mean_val + sigma_factor*std_val
-                    LCL_I = mean_val - sigma_factor*std_val
-
-                    ax1.plot(vals, marker='o', color='blue')
-                    ax1.axhline(mean_val, color='green', linestyle='--', label='Mean')
-                    ax1.axhline(UCL_I, color='red', linestyle='--', label=f'UCL I ({sigma_factor}σ)')
-                    ax1.axhline(LCL_I, color='red', linestyle='--', label=f'LCL I ({sigma_factor}σ)')
+                    m_v, s_v = np.mean(v), np.std(v, ddof=1)
+                    U, L = m_v + sigma_factor*s_v, m_v - sigma_factor*s_v
+                    ax1.plot(v, marker='o', color='blue')
+                    ax1.axhline(m_v, color='green', ls='--', label='Mean')
+                    ax1.axhline(U, color='red', ls='--', label='UCL')
+                    ax1.axhline(L, color='red', ls='--', label='LCL')
                     ax1.set_title(f"Individuals Chart for {feat}")
                     ax1.legend()
-
-                    MR = np.abs(np.diff(vals))
-                    MR_mean = np.mean(MR)
-                    d3, d4 = 0, 3.267
-                    UCL_MR = d4 * MR_mean
-                    LCL_MR = d3 * MR_mean
+                    MR = np.abs(np.diff(v))
                     ax2.plot(MR, marker='o', color='orange')
-                    ax2.axhline(MR_mean, color='green', linestyle='--', label='MR Mean')
-                    ax2.axhline(UCL_MR, color='red', linestyle='--', label='UCL MR')
-                    ax2.axhline(LCL_MR, color='red', linestyle='--', label='LCL MR')
-                    ax2.set_title(f"Moving Range Chart for {feat}")
-                    ax2.legend()
+                    ax2.axhline(np.mean(MR), color='green', ls='--')
+                    ax2.set_title("Moving Range Chart")
                     st.pyplot(fig)
 
             # --- Success Probability Curves ---
-            pairs = [("YS","TS"), ("EL","YPE")]
             target_grade = 'A-B+數'
+            pairs = [("YS","TS"), ("EL","YPE")]
             for f1, f2 in pairs:
                 if f1 in df_t.columns and f2 in df_t.columns:
                     st.markdown(f"### Success Probability Curves: {f1} & {f2}")
                     fig, axes = plt.subplots(1, 2, figsize=(18, 5))
-                    for ax, feat in zip(axes, [f1, f2]):
-                        temp_opt = df_t[[feat, target_grade, 'Total_Count']].dropna()
-                        if len(temp_opt) > 0:
-                            temp_opt['bin'] = pd.qcut(temp_opt[feat], q=12, duplicates='drop')
-                            bin_res = temp_opt.groupby('bin', observed=True).agg({
-                                target_grade: 'sum',
-                                'Total_Count': 'sum'
-                            })
-                            bin_res['Success_Rate'] = (bin_res[target_grade] / bin_res['Total_Count'] * 100).fillna(0).round(0).astype(int)
-                            bin_res['Label'] = bin_res.index.map(lambda x: f"{x.left:.0f}-{x.right:.0f}")
-                            x_positions = np.arange(len(bin_res))
-                            
-                            ax.bar(x_positions, bin_res['Total_Count'], color='lightgray', alpha=0.5, label="Volume")
+                    for ax, f in zip(axes, [f1, f2]):
+                        temp = df_t[[f, target_grade, 'Total_Count']].dropna()
+                        if len(temp) > 0:
+                            temp['bin'] = pd.qcut(temp[f], q=12, duplicates='drop')
+                            bin_r = temp.groupby('bin', observed=True).agg({target_grade:'sum', 'Total_Count':'sum'})
+                            bin_r['SR'] = (bin_r[target_grade]/bin_r['Total_Count']*100).fillna(0).round(0).astype(int)
+                            bin_r['L'] = bin_r.index.map(lambda x: f"{x.left:.0f}-{x.right:.0f}")
+                            x_pos = np.arange(len(bin_r))
+                            ax.bar(x_pos, bin_r['Total_Count'], color='lightgray', alpha=0.5)
                             ax2 = ax.twinx()
-                            ax2.plot(x_positions, bin_res['Success_Rate'], marker='o', color='green', lw=2, label="Success %")
-                            ax.set_xticks(x_positions)
-                            ax.set_xticklabels(bin_res['Label'], rotation=45, ha='right')
-                            ax.set_xlabel(feat)
-                            ax.set_ylabel("Volume", color='gray')
-                            ax2.set_ylabel("Success %", color='green')
+                            ax2.plot(x_pos, bin_r['SR'], marker='o', color='green', lw=2)
+                            ax.set_xticks(x_pos)
+                            ax.set_xticklabels(bin_r['L'], rotation=45, ha='right')
+                            ax.set_xlabel(f)
                             ax2.set_ylim(0, 105)
                     st.pyplot(fig)
                     st.markdown("---")
 
-        # --- NÚT XUẤT FILE TỔNG HỢP ---
+        # --- EXPORT FINAL ---
         if all_export_data:
             st.markdown("### 📥 Export Final Proposed Control Limits")
-            export_df = pd.DataFrame(all_export_data)
-            
             towrite = io.BytesIO()
-            export_df.to_excel(towrite, index=False, engine='openpyxl')
+            pd.DataFrame(all_export_data).to_excel(towrite, index=False, engine='openpyxl')
             towrite.seek(0)
-            
-            st.download_button(
-                label="📥 Tải xuống File Tổng Hợp (Excel)",
-                data=towrite,
-                file_name="QC_Proposed_Control_Limits.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+            st.download_button(label="📥 Tải xuống File Tổng Hợp (Excel)", data=towrite, 
+                               file_name="QC_Proposed_Control_Limits.xlsx")
 
 else:
-    st.info("Please upload an Excel file to start analysis.")
+    st.info("Please upload an Excel file.")
