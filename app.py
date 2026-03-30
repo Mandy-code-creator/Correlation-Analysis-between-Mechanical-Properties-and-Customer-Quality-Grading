@@ -230,9 +230,10 @@ if uploaded_file is not None:
                         'Total_Count': 'sum'
                     })
                     bin_res['Success_Rate'] = (bin_res[target_grade] / bin_res['Total_Count'] * 100).round(2)
-                    # chọn bins nằm trong control zone
-                    bins_in_ctrl = bin_res[(bin_res.index.map(lambda x: x.left) >= LCL_I) &
-                                           (bin_res.index.map(lambda x: x.right) <= UCL_I)]
+                    bin_res['Mid'] = bin_res.index.map(lambda x: x.mid)
+
+                    # chọn bins nằm trong control zone bằng Mid
+                    bins_in_ctrl = bin_res[(bin_res['Mid'] >= LCL_I) & (bin_res['Mid'] <= UCL_I)]
                     if not bins_in_ctrl.empty:
                         success_prob = bins_in_ctrl['Success_Rate'].mean()
 
@@ -267,3 +268,67 @@ if uploaded_file is not None:
 
             status_df = pd.DataFrame(status_list)
             st.dataframe(status_df, use_container_width=True)
+
+            # --- I-MR Chart for each feature ---
+            for feat in mech_features:
+                st.markdown(f"### I-MR Chart: {feat}")
+                vals = df_t[feat].dropna().values
+                if len(vals) > 1:
+                    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 6))
+                    mean_val = np.mean(vals)
+                    std_val = np.std(vals, ddof=1)
+                    UCL_I = mean_val + sigma_factor*std_val
+                    LCL_I = mean_val - sigma_factor*std_val
+
+                    # Individuals chart
+                    ax1.plot(vals, marker='o', color='blue')
+                    ax1.axhline(mean_val, color='green', linestyle='--', label='Mean')
+                    ax1.axhline(UCL_I, color='red', linestyle='--', label=f'UCL I ({sigma_factor}σ)')
+                    ax1.axhline(LCL_I, color='red', linestyle='--', label=f'LCL I ({sigma_factor}σ)')
+                    ax1.set_title(f"Individuals Chart for {feat}")
+                    ax1.legend()
+
+                    # Moving Range chart
+                    MR = np.abs(np.diff(vals))
+                    MR_mean = np.mean(MR)
+                    d3, d4 = 0, 3.267  # n=2
+                    UCL_MR = d4 * MR_mean
+                    LCL_MR = d3 * MR_mean
+                    ax2.plot(MR, marker='o', color='orange')
+                    ax2.axhline(MR_mean, color='green', linestyle='--', label='MR Mean')
+                    ax2.axhline(UCL_MR, color='red', linestyle='--', label='UCL MR')
+                    ax2.axhline(LCL_MR, color='red', linestyle='--', label='LCL MR')
+                    ax2.set_title(f"Moving Range Chart for {feat}")
+                    ax2.legend()
+
+                    st.pyplot(fig)
+
+            # --- Success Probability Curves (YS–TS, EL–YPE) ---
+            pairs = [("YS","TS"), ("EL","YPE")]
+            target_grade = 'A-B+數'
+            for f1, f2 in pairs:
+                if f1 in df_t.columns and f2 in df_t.columns:
+                    st.markdown(f"### Success Probability Curves: {f1} & {f2}")
+                    fig, axes = plt.subplots(1, 2, figsize=(18, 5))
+                    for ax, feat in zip(axes, [f1, f2]):
+                        temp_opt = df_t[[feat, target_grade, 'Total_Count']].dropna()
+                        if len(temp_opt) > 0:
+                            temp_opt['bin'] = pd.qcut(temp_opt[feat], q=12, duplicates='drop')
+                            bin_res = temp_opt.groupby('bin', observed=True).agg({
+                                target_grade: 'sum',
+                                'Total_Count': 'sum'
+                            })
+                            bin_res['Success_Rate'] = (bin_res[target_grade] / bin_res['Total_Count'] * 100).round(2)
+                            bin_res['Mid'] = bin_res.index.map(lambda x: x.mid)
+                            # Combined plot
+                            ax.bar(bin_res['Mid'].astype(float), bin_res['Total_Count'], 
+                                   color='lightgray', alpha=0.5, label="Volume")
+                            ax2 = ax.twinx()
+                            ax2.plot(bin_res['Mid'].astype(float), bin_res['Success_Rate'], 
+                                     marker='o', color='green', lw=2, label="Success %")
+                            ax.set_xlabel(feat)
+                            ax.set_ylabel("Volume", color='gray')
+                            ax2.set_ylabel("Success %", color='green')
+                            ax2.set_ylim(0, 105)
+                    st.pyplot(fig)
+                    st.markdown("---")
