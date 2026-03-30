@@ -64,24 +64,26 @@ if uploaded_file is not None:
             
             # FORMAT BẢNG ĐỂ HIỂN THỊ CHUYÊN NGHIỆP HƠN
             display_df = summary_df.copy()
-            # Đổi tên cột từ tiếng Trung sang tiếng Việt viết tắt (SL = Số lượng)
+            
+            # --- ĐÃ CẬP NHẬT: Đổi tên cột sang Tiếng Anh cho rõ ràng, chuẩn mực ---
             display_df.rename(columns={
-                '厚度歸類': 'Độ dày',
-                'A+B+數': 'SL A+B+',
-                'A-B+數': 'SL A-B+',
-                'A-B數': 'SL A-B',
-                'A-B-數': 'SL A-B-',
-                'B+數': 'SL B+'
+                '厚度歸類': 'Thickness',
+                'Tổng cuộn kiểm tra': 'Total Coils',
+                'A+B+數': 'Count A+B+',
+                'A-B+數': 'Count A-B+',
+                'A-B數': 'Count A-B',
+                'A-B-數': 'Count A-B-',
+                'B+數': 'Count B+'
             }, inplace=True)
             
-            # Sắp xếp lại thứ tự: Cứ 1 cột Số lượng sẽ đi kèm 1 cột Phần trăm
+            # Sắp xếp lại thứ tự hiển thị của bảng
             display_cols = [
-                'Độ dày', 'Tổng cuộn kiểm tra', 
-                'SL A+B+', '% A+B+', 
-                'SL A-B+', '% A-B+', 
-                'SL A-B', '% A-B', 
-                'SL A-B-', '% A-B-', 
-                'SL B+', '% B+'
+                'Thickness', 'Total Coils', 
+                'Count A+B+', '% A+B+', 
+                'Count A-B+', '% A-B+', 
+                'Count A-B', '% A-B', 
+                'Count A-B-', '% A-B-', 
+                'Count B+', '% B+'
             ]
             
             # Hiển thị bảng
