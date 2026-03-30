@@ -38,6 +38,14 @@ if uploaded_file is not None:
     df['Quality_Score'] = (5 * df.get('A+B+數',0) + 4 * df.get('A-B+數',0) + 
                            3 * df.get('A-B數',0) + 2 * df.get('A-B-數',0) + 1 * df.get('B+數',0)) / df['Total_Count']
 
+    # --- CURRENT CONTROL LIMITS ---
+    current_limits = {
+        'YS': {'Lower':405,'Upper':500},
+        'TS': {'Lower':415,'Upper':550},
+        'EL': {'Lower':25,'Upper':None},
+        'YPE':{'Lower':4,'Upper':None}
+    }
+
     # --- CREATE TABS ---
     tab1, tab2, tab3, tab4 = st.tabs(["1. Summary Table & Pie Charts", 
                                        "2. Correlation Matrix", 
@@ -68,7 +76,7 @@ if uploaded_file is not None:
 
         with col2:
             st.subheader("Percentage Pie Charts")
-            plot_df = summary_df.set_index('厚度歸類')[count_cols]
+            plot_df = summary_df.set_index('Thickness')[count_cols]
             plot_df.columns = ['A+B+', 'A-B+', 'A-B', 'A-B-', 'B+']
             pie_colors = ['#2ca02c', '#1f77b4', '#ff7f0e', '#9467bd', '#d62728']
 
@@ -185,12 +193,21 @@ if uploaded_file is not None:
                 upper = np.percentile(arr,97.5)
                 mean = np.average(arr)
                 std = np.std(arr)
-                limits.append({'Parameter':feat,'Lower Limit':lower,'Upper Limit':upper,'Weighted Mean':mean,'Weighted Std':std})
+                current = current_limits.get(feat, {})
+                limits.append({
+                    'Parameter':feat,
+                    'Lower Limit (Optimal)':lower,
+                    'Upper Limit (Optimal)':upper,
+                    'Weighted Mean':mean,
+                    'Weighted Std':std,
+                    'Current Lower Limit': current.get('Lower', None),
+                    'Current Upper Limit': current.get('Upper', None)
+                })
             else:
                 st.warning(f"Feature {feat} does not have enough valid data to compute limits.")
         limits_df = pd.DataFrame(limits)
         st.dataframe(limits_df, use_container_width=True)
-        st.markdown("*Optimal limits are based on weighted 2.5%–97.5% percentile of actual distribution.*")
+        st.markdown("*Optimal limits are based on weighted 2.5%–97.5% percentile of actual distribution and compared with current control limits.*")
 
 else:
     st.info("Please upload your Excel data to start analysis.")
