@@ -39,12 +39,11 @@ if uploaded_file is not None:
     df['Total_Count'] = df[count_cols].sum(axis=1)
     df = df[df['Total_Count'] > 0].copy()
 
-    # --- 3. CREATE TABS ---
-    tab1, tab2, tab3, tab4 = st.tabs([
+    # --- 3. CREATE TABS (OPTIMIZED TO 3 TABS) ---
+    tab1, tab2, tab3 = st.tabs([
         "1. Summary & Yields", 
-        "2. Correlation Matrix", 
-        "3. Weighted Distribution (Sturges)",
-        "4. SAFE WINDOW OPTIMIZATION"
+        "2. Distribution Analysis (Parallel View)",
+        "3. SAFE WINDOW OPTIMIZATION & EXPORT"
     ])
 
     # --- TAB 1: SUMMARY ---
@@ -59,21 +58,21 @@ if uploaded_file is not None:
             
         display_df = summary_df.copy()
         display_df.rename(columns={'厚度歸類': 'Thickness'}, inplace=True)
+        
+        # Thêm STT
         display_df.insert(0, 'STT', range(1, len(display_df) + 1))
         
+        # Ép kiểu int cho các cột count để xóa đuôi .0
+        cols_to_int = count_cols + ['Total Coils']
+        for c in cols_to_int:
+            if c in display_df.columns:
+                display_df[c] = display_df[c].astype(int)
+                
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-    # --- TAB 2: CORRELATION ---
+    # --- TAB 2: DISTRIBUTION (PARALLEL VIEW) ---
     with tab2:
-        st.header("2. Mechanical Correlation Index")
-        df['Quality_Score'] = (5*df.get('A+B+數', 0) + 4*df.get('A-B+數', 0) + 3*df.get('A-B數', 0) +
-                               2*df.get('A-B-數', 0) + 1*df.get('B+數', 0)) / df['Total_Count']
-        corr_matrix = df[['Quality_Score'] + mech_features].corr()[['Quality_Score']].drop('Quality_Score')
-        st.dataframe(corr_matrix.style.background_gradient(cmap='coolwarm'), use_container_width=True)
-
-    # --- TAB 3: DISTRIBUTION (PARALLEL VIEW) ---
-    with tab3:
-        st.header("3. Distribution Analysis (Parallel Clear View)")
+        st.header("2. Distribution Analysis (Parallel Clear View)")
         grade_mapping = {'A+B+': 'A+B+數', 'A-B+': 'A-B+數', 'A-B': 'A-B數', 'A-B-': 'A-B-數', 'B+': 'B+數'}
         colors = ['#2ca02c', '#1f77b4', '#ff7f0e', '#9467bd', '#d62728']
         thickness_list = sorted(df['厚度歸類'].dropna().unique(), key=str)
@@ -150,9 +149,9 @@ if uploaded_file is not None:
                     st.pyplot(fig_ype)
             st.markdown("---")
 
-    # --- TAB 4: SAFE WINDOW OPTIMIZATION ---
-    with tab4:
-        st.header("4. Safe Operating Window by Thickness (with Export)")
+    # --- TAB 3: SAFE WINDOW OPTIMIZATION & EXPORT ---
+    with tab3:
+        st.header("3. Safe Operating Window by Thickness (with I-MR & Export)")
         sigma_factor = st.radio("Select Sigma Factor", [2.0, 2.5, 3.0], index=0)
 
         spec_limits = {
@@ -184,7 +183,6 @@ if uploaded_file is not None:
                 safe_val = mean_val - sigma_factor*std_val
                 low, high = spec_limits.get(feat, (None, None))
 
-                # Làm tròn số nguyên
                 if low is not None and high is not None:
                     spec_str = f"{int(low)}–{int(high)}"
                     ctrl_low = int(round(low + 0.05*(high-low)))
@@ -217,7 +215,6 @@ if uploaded_file is not None:
                     if not bins_in_ctrl.empty:
                         success_prob = bins_in_ctrl['Success_Rate'].mean()
 
-                # Segment Distribution
                 seg_A_Bplusplus = df_t['A+B+數'].sum()
                 seg_A_Bplus = df_t['A-B+數'].sum()
                 seg_A_B = df_t['A-B數'].sum()
@@ -269,7 +266,6 @@ if uploaded_file is not None:
                 status_list.append(row_data)
                 all_export_data.append(row_data)
 
-            # Hiển thị bảng (bỏ cột Thickness đi cho gọn)
             display_status_df = pd.DataFrame(status_list)
             if not display_status_df.empty:
                 display_status_df = display_status_df.drop(columns=['Thickness'])
@@ -305,7 +301,37 @@ if uploaded_file is not None:
                     ax2.set_title(f"Moving Range Chart for {feat}")
                     ax2.legend()
                     st.pyplot(fig)
-    
+
+            # --- Success Probability Curves ---
+            pairs = [("YS","TS"), ("EL","YPE")]
+            target_grade = 'A-B+數'
+            for f1, f2 in pairs:
+                if f1 in df_t.columns and f2 in df_t.columns:
+                    st.markdown(f"### Success Probability Curves: {f1} & {f2}")
+                    fig, axes = plt.subplots(1, 2, figsize=(18, 5))
+                    for ax, feat in zip(axes, [f1, f2]):
+                        temp_opt = df_t[[feat, target_grade, 'Total_Count']].dropna()
+                        if len(temp_opt) > 0:
+                            temp_opt['bin'] = pd.qcut(temp_opt[feat], q=12, duplicates='drop')
+                            bin_res = temp_opt.groupby('bin', observed=True).agg({
+                                target_grade: 'sum',
+                                'Total_Count': 'sum'
+                            })
+                            bin_res['Success_Rate'] = (bin_res[target_grade] / bin_res['Total_Count'] * 100).fillna(0).round(0).astype(int)
+                            bin_res['Label'] = bin_res.index.map(lambda x: f"{x.left:.0f}-{x.right:.0f}")
+                            x_positions = np.arange(len(bin_res))
+                            
+                            ax.bar(x_positions, bin_res['Total_Count'], color='lightgray', alpha=0.5, label="Volume")
+                            ax2 = ax.twinx()
+                            ax2.plot(x_positions, bin_res['Success_Rate'], marker='o', color='green', lw=2, label="Success %")
+                            ax.set_xticks(x_positions)
+                            ax.set_xticklabels(bin_res['Label'], rotation=45, ha='right')
+                            ax.set_xlabel(feat)
+                            ax.set_ylabel("Volume", color='gray')
+                            ax2.set_ylabel("Success %", color='green')
+                            ax2.set_ylim(0, 105)
+                    st.pyplot(fig)
+                    st.markdown("---")
 
         # --- NÚT XUẤT FILE TỔNG HỢP ---
         if all_export_data:
