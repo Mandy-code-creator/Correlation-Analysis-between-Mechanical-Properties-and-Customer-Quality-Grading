@@ -6,9 +6,9 @@ import numpy as np
 import scipy.stats as stats
 
 # Cấu hình trang Dashboard
-st.set_page_config(page_title="QC Data Analysis Dashboard", layout="wide")
+st.set_page_config(page_title="QC Data Analysis Dashboard - Enhanced", layout="wide")
 
-st.title("📊 Hệ thống Phân tích & Định hình Cơ tính theo Cấp độ Chất lượng")
+st.title("📊 Hệ thống Phân tích & Định hình Cơ tính theo Cấp độ Chất lượng - Phiên bản Rõ ràng")
 st.markdown("---")
 
 # 1. Tải file Excel lên
@@ -32,7 +32,7 @@ if uploaded_file is not None:
                            3 * df['A-B數'] + 2 * df['A-B-數'] + 1 * df['B+數']) / df['Total_Count']
 
     # Tạo 3 Tabs
-    tab1, tab2, tab3 = st.tabs(["1. Bảng Thống kê & Tỉ lệ", "2. Ma trận Tương quan", "3. Phân tích Dữ liệu Toàn cảnh"])
+    tab1, tab2, tab3 = st.tabs(["1. Bảng Thống kê & Tỉ lệ", "2. Ma trận Tương quan", "3. Phân tích Dữ liệu Toàn cảnh (SPC Clear View)"])
 
     # --- TAB 1: THỐNG KÊ KẾT QUẢ ---
     with tab1:
@@ -60,8 +60,8 @@ if uploaded_file is not None:
             thicknesses = plot_df.index
             n_pies = len(thicknesses)
             
-            # Tạo khung vẽ tùy theo số lượng độ dày (mỗi pie chart rộng 3.5 inch)
-            fig1, axes1 = plt.subplots(1, n_pies, figsize=(3.5 * n_pies, 3.5))
+            # Tăng kích thước Figsize đáng kể để Pie charts to hơn
+            fig1, axes1 = plt.subplots(1, n_pies, figsize=(4.5 * n_pies, 4.5))
             
             # Xử lý trường hợp chỉ có 1 độ dày
             if n_pies == 1:
@@ -71,20 +71,18 @@ if uploaded_file is not None:
             for ax, thick in zip(axes1, thicknesses):
                 data = plot_df.loc[thick]
                 
-                # Chỉ lấy những cấp độ có số lượng > 0 để vẽ (tránh lỗi)
                 mask = data > 0
                 if mask.any():
                     ax.pie(
                         data[mask], 
                         autopct=lambda p: f'{p:.1f}%' if p > 3 else '', # Chỉ hiện số nếu > 3%
-                        startangle=90, # Bắt đầu xoay từ góc 12h
+                        startangle=90, 
                         colors=[c for c, m in zip(pie_colors, mask) if m],
-                        wedgeprops={'edgecolor': 'white', 'linewidth': 1.5} # Viền trắng tách các khối
+                        wedgeprops={'edgecolor': 'white', 'linewidth': 1.5}
                     )
-                ax.set_title(f"Độ dày: {thick}", fontsize=12, fontweight='bold')
+                ax.set_title(f"Độ dày: {thick}", fontsize=14, fontweight='bold')
                 
-            # Đặt chú thích (Legend) chung ở bên phải ngoài cùng
-            fig1.legend(plot_df.columns, title="Cấp độ chất lượng", bbox_to_anchor=(1.05, 0.5), loc="center left")
+            fig1.legend(plot_df.columns, title="Cấp độ chất lượng", bbox_to_anchor=(1.05, 0.5), loc="center left", fontsize=11)
             plt.tight_layout()
             st.pyplot(fig1)
 
@@ -106,10 +104,10 @@ if uploaded_file is not None:
             max_corr_feature = corr_matrix.idxmin()[0]
             st.info(f"Dựa trên dữ liệu, thông số **{max_corr_feature}** có ảnh hưởng tiêu cực nhất đến điểm chất lượng. Khi {max_corr_feature} tăng cao, chất lượng có xu hướng giảm xuống.")
 
-    # --- TAB 3: PHÂN TÍCH THEO ĐỘ DÀY & CẤP ĐỘ CHẤT LƯỢNG (NORMAL CURVE) ---
+    # --- TAB 3: PHÂN TÍCH THEO ĐỘ DÀY & CẤP ĐỘ CHẤT LƯỢNG (BẢN CLAR VIEW - TỰ ĐỘNG PHÓNG TO) ---
     with tab3:
-        st.header("3. So sánh Cơ tính phân rã theo Độ Dày và Cấp Độ")
-        st.markdown("Biểu đồ cột thể hiện dữ liệu thực tế. **Các đường cong là phân phối chuẩn (Normal Bell Curve)** được tính toán toán học từ độ lệch chuẩn và giá trị trung bình của từng nhóm, loại bỏ nhiễu dữ liệu.")
+        st.header("3. Phân tích Phân phối Toàn cảnh (SPC - Tự động Phóng to)")
+        st.markdown("Hệ thống tự động phân rã tất cả dữ liệu theo **Độ dày** (Subplots) và vẽ **Cấp độ chất lượng** phân bố chồng lên nhau. Biểu đồ **tự động phóng to trục X** để vùng phân phối chính trông rõ ràng nhất.")
         
         grade_mapping = {
             'A+B+ (Xuất sắc)': 'A+B+數',
@@ -119,6 +117,7 @@ if uploaded_file is not None:
             'B+ (Thứ phẩm)': 'B+數'
         }
         features = ['YS', 'TS', 'EL', 'YPE', 'HARDNESS']
+        # Đồng bộ màu sắc
         colors = ['#2ca02c', '#1f77b4', '#ff7f0e', '#9467bd', '#d62728'] 
         
         thickness_list = df['厚度歸類'].dropna().unique()
@@ -126,27 +125,55 @@ if uploaded_file is not None:
         num_thick = len(thickness_list)
         
         for feature in features:
-            st.subheader(f"📊 Thông số: {feature}")
-            fig, axes = plt.subplots(nrows=1, ncols=num_thick, figsize=(5 * num_thick, 4.5), squeeze=False)
+            st.markdown(f"### 📊 Thông số cơ tính: **{feature}**")
+            
+            # --- TÍNH TOÁN PHẠM VI DỮ LIỆU TỔNG THỂ CHO FEATURE NÀY ĐỂ AUTO-ZOOM ---
+            all_feature_data = df[[feature] + count_cols].dropna()
+            total_values = []
+            for grade_col in count_cols:
+                mask = all_feature_data[grade_col] > 0
+                if mask.any():
+                    vals = all_feature_data[mask][feature].values
+                    wgts = all_feature_data[mask][grade_col].values
+                    # Lặp lại giá trị theo trọng số để tạo tập dữ liệu tổng thể đúng
+                    total_values.extend(np.repeat(vals, wgts.astype(int)))
+            
+            if len(total_values) > 10:
+                # Tính khoảng phân vị 1% - 99% để loại bỏ outliers gây nhiễu và phóng to vùng chính
+                xmin_total, xmax_total = np.percentile(total_values, [1, 99])
+                
+                # Làm tròn phạm vi một chút cho đẹp (ví dụ YS 342-498 => 340-500)
+                round_factor = 5 if feature in ['YS', 'TS'] else 0.5
+                xmin_total = np.floor(xmin_total / round_factor) * round_factor
+                xmax_total = np.ceil(xmax_total / round_factor) * round_factor
+                
+                if xmin_total == xmax_total: # Xử lý lỗi nếu các giá trị đều giống y hệt nhau
+                    xmin_total -= round_factor
+                    xmax_total += round_factor
+                
+                bin_width = (xmax_total - xmin_total) / 20  
+                bin_range = (xmin_total, xmax_total)
+            else:
+                bin_range = None
+                bin_width = 1
+            
+            # --- CẤU HÌNH SUBPLOTS TO, RÕ RÀNG (CHIA NHIỀU HÀNG NẾU CẦN) ---
+            # Tăng figsize đáng kể, chiều cao Subplot to hơn
+            n_cols = num_thick
+            n_rows = (n_cols + 1) // 2 # Tối đa 2 Subplot/hàng
+            
+            # Tăng height đáng kể
+            fig, axes = plt.subplots(nrows=n_rows, ncols=min(2, n_cols), figsize=(12 if n_cols == 1 else 20, 6 * n_rows), squeeze=False)
+            
+            axes_flat = axes.flatten()
             
             for i, thickness in enumerate(thickness_list):
-                ax = axes[0, i]
+                if i >= len(axes_flat): break # Đề phòng lỗi
+                ax = axes_flat[i]
                 df_thick = df[df['厚度歸類'] == thickness]
                 has_data = False
                 
-                min_val = df_thick[feature].min()
-                max_val = df_thick[feature].max()
-                
-                if pd.notna(min_val) and pd.notna(max_val):
-                    if min_val == max_val: 
-                        min_val -= 1
-                        max_val += 1
-                    bin_range = (min_val, max_val)
-                    bin_width = (max_val - min_val) / 20  
-                else:
-                    bin_range = None
-                    bin_width = 1
-                
+                # Vẽ từng cấp độ chất lượng
                 for (grade_label, grade_col), color in zip(grade_mapping.items(), colors):
                     temp_df = df_thick[[feature, grade_col]].dropna()
                     temp_df = temp_df[temp_df[grade_col] > 0]
@@ -157,7 +184,7 @@ if uploaded_file is not None:
                         weights = temp_df[grade_col].values
                         total_weight = weights.sum()
                         
-                        # Vẽ phân bố dữ liệu thực (Histogram)
+                        # Vẽ phân bố dữ liệu thực (Histogram) - ĐÃ CẢI THIỆN CHIỀU CAO CỘT
                         sns.histplot(
                             data=temp_df,
                             x=feature,
@@ -165,42 +192,49 @@ if uploaded_file is not None:
                             label=grade_label,
                             color=color,
                             bins=20,                 
-                            binrange=bin_range,      
+                            binrange=bin_range,      # Sử dụng phạm vi Auto-Zoom
                             kde=False,               
-                            stat="count",            
+                            stat="count",            # Trục Y là số lượng cuộn
                             alpha=0.25,
                             linewidth=0.5,
                             ax=ax
                         )
                         
-                        # Tính toán và vẽ Normal Curve
+                        # Tính toán tham số Thống kê có trọng số
                         weighted_mean = np.average(values, weights=weights)
                         weighted_var = np.average((values - weighted_mean)**2, weights=weights)
                         weighted_std = np.sqrt(weighted_var)
                         
-                        if weighted_std > 0:
-                            x_axis = np.linspace(min_val, max_val, 150)
+                        # Vẽ đường Phân phối chuẩn toán học (Normal Curve)
+                        if weighted_std > 0 and bin_range is not None:
+                            x_axis = np.linspace(bin_range[0], bin_range[1], 150)
                             pdf = stats.norm.pdf(x_axis, weighted_mean, weighted_std)
+                            # Đổi hệ số PDF sang quy mô đếm số lượng cột
                             scaled_pdf = pdf * total_weight * bin_width
-                            ax.plot(x_axis, scaled_pdf, color=color, linewidth=2, alpha=0.9)
+                            # Vẽ đường mượt mà, TO VÀ RÕ RÀNG
+                            ax.plot(x_axis, scaled_pdf, color=color, linewidth=2.5, alpha=0.95)
                             
                         # Vẽ đường nét đứt Trung bình
                         ax.axvline(weighted_mean, color=color, linestyle='--', linewidth=1.5, alpha=0.9)
                 
-                if has_data:
-                    ax.set_title(f"Độ dày: {thickness}", fontsize=12, fontweight='bold')
-                    ax.set_xlabel(f"Giá trị {feature}")
-                    ax.set_ylabel("Số lượng cuộn" if i == 0 else "") 
-                    ax.grid(axis='y', linestyle=':', alpha=0.6)
+                # Trang trí trục và tiêu đề TO RÕ RÀNG
+                if has_data and bin_range is not None:
+                    ax.set_title(f"Độ dày: {thickness}", fontsize=15, fontweight='bold')
+                    ax.set_xlabel(f"Giá trị {feature}", fontsize=12)
+                    # Nhãn trục Y TO RÕ RÀNG
+                    ax.set_ylabel("Số lượng cuộn", fontsize=12) 
+                    ax.set_xlim(bin_range) # ÁP DỤNG AUTO-ZOOM
+                    ax.grid(axis='y', linestyle=':', alpha=0.7)
                     
+                    # Chỉ hiển thị Legend chung ở Subplot cuối cùng để không bị rối
                     if i == num_thick - 1:
                         handles, labels = ax.get_legend_handles_labels()
                         unique_labels = list(grade_mapping.keys())
                         unique_handles = [h for h, l in zip(handles, labels) if l in unique_labels]
                         if unique_handles:
-                            ax.legend(unique_handles, unique_labels, title="Cấp độ chất lượng", bbox_to_anchor=(1.05, 1), loc='upper left')
+                            ax.legend(unique_handles, unique_labels, title="Cấp độ chất lượng", bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=10)
                 else:
-                    ax.set_title(f"Độ dày: {thickness}\n(Không có dữ liệu)", fontsize=11, color='gray')
+                    ax.set_title(f"Độ dày: {thickness}\n(Không có dữ liệu)", fontsize=13, color='gray')
                     ax.axis('off')
             
             plt.tight_layout()
