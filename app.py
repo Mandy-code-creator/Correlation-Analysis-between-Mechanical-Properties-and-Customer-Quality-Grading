@@ -54,13 +54,16 @@ if uploaded_file is not None:
         summary_df['Total Coils'] = summary_df[count_cols].sum(axis=1)
         
         for col in count_cols:
+            # Tính % và làm tròn thành số nguyên
             summary_df[f"% {col}"] = (summary_df[col] / summary_df['Total Coils'] * 100).fillna(0).round(0).astype(int)
             
         display_df = summary_df.copy()
         display_df.rename(columns={'厚度歸類': 'Thickness'}, inplace=True)
         
+        # Thêm cột STT bắt đầu từ 1
         display_df.insert(0, 'STT', range(1, len(display_df) + 1))
         
+        # Dùng hide_index=True để ẩn cột index mặc định của dataframe
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
     # --- TAB 2: CORRELATION ---
@@ -69,6 +72,7 @@ if uploaded_file is not None:
         df['Quality_Score'] = (5*df.get('A+B+數', 0) + 4*df.get('A-B+數', 0) + 3*df.get('A-B數', 0) +
                                2*df.get('A-B-數', 0) + 1*df.get('B+數', 0)) / df['Total_Count']
         corr_matrix = df[['Quality_Score'] + mech_features].corr()[['Quality_Score']].drop('Quality_Score')
+        # Hệ số tương quan vẫn giữ số thập phân vì nằm trong khoảng -1 đến 1
         st.dataframe(corr_matrix.style.background_gradient(cmap='coolwarm'), use_container_width=True)
 
     # --- TAB 3: DISTRIBUTION (PARALLEL VIEW) ---
@@ -174,7 +178,7 @@ if uploaded_file is not None:
                 if len(vals) == 0:
                     continue
 
-                # loại bỏ ngoại lai (±3σ)
+                # Loại bỏ ngoại lai (±3σ)
                 mean_val = np.mean(vals)
                 std_val = np.std(vals, ddof=1)
                 vals_clean = vals[(vals >= mean_val-3*std_val) & (vals <= mean_val+3*std_val)]
@@ -210,7 +214,10 @@ if uploaded_file is not None:
                         'Total_Count': 'sum'
                     })
                     bin_res['Success_Rate'] = (bin_res[target_grade] / bin_res['Total_Count'] * 100).round(2)
-                    bin_res['Mid'] = bin_res.index.map(lambda x: x.mid)
+                    
+                    # FIX TYPE ERROR HERE: astype(float)
+                    bin_res['Mid'] = bin_res.index.map(lambda x: x.mid).astype(float)
+                    
                     bins_in_ctrl = bin_res[(bin_res['Mid'] >= LCL_I) & (bin_res['Mid'] <= UCL_I)]
                     if not bins_in_ctrl.empty:
                         success_prob = bins_in_ctrl['Success_Rate'].mean()
@@ -236,7 +243,8 @@ if uploaded_file is not None:
 
                 # Expected Quality Level
                 if success_prob is not None:
-                    if success_prob >= 70 and (seg_A_Bplusplus+seg_A_Bplus)/seg_total >= 0.75:
+                    # FIX ZERO DIVISION RISK HERE: added seg_total > 0
+                    if success_prob >= 70 and seg_total > 0 and (seg_A_Bplusplus+seg_A_Bplus)/seg_total >= 0.75:
                         exp_quality = "A-B+"
                     elif success_prob >= 40:
                         exp_quality = "A-B"
