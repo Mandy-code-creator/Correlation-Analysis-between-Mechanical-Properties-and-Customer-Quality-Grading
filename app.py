@@ -3,6 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
+import scipy.stats as stats
 
 # Cấu hình trang Dashboard
 st.set_page_config(page_title="QC Data Analysis Dashboard", layout="wide")
@@ -36,11 +37,8 @@ if uploaded_file is not None:
     # --- TAB 1: THỐNG KÊ KẾT QUẢ ---
     with tab1:
         st.header("1. Thống kê Phân bổ Chất lượng tổng hợp")
-        
-        # Tạo bảng thống kê tổng hợp theo độ dày
         summary_df = df.groupby('厚度歸類')[count_cols].sum().reset_index()
         summary_df['Tổng cuộn kiểm tra'] = summary_df[count_cols].sum(axis=1)
-        
         summary_df['Tỉ lệ A+B+ (%)'] = (summary_df['A+B+數'] / summary_df['Tổng cuộn kiểm tra'] * 100).round(2)
         
         col1, col2 = st.columns([1, 1])
@@ -63,12 +61,10 @@ if uploaded_file is not None:
     with tab2:
         st.header("2. Ma trận Hệ số Tương quan")
         features = ['YS', 'TS', 'EL', 'YPE', 'HARDNESS']
-        
         corr_matrix = df[['Quality_Score'] + features].corr()[['Quality_Score']].drop('Quality_Score')
         corr_matrix.columns = ['Độ tương quan với Điểm Chất lượng Tổng']
         
         col_corr1, col_corr2 = st.columns([1, 2])
-        
         with col_corr1:
             st.subheader("Bảng Hệ số Tương quan (Pearson)")
             st.markdown("*(Hệ số càng gần -1 thì cột cơ tính đó càng cao, chất lượng càng giảm)*")
@@ -79,10 +75,10 @@ if uploaded_file is not None:
             max_corr_feature = corr_matrix.idxmin()[0]
             st.info(f"Dựa trên dữ liệu, thông số **{max_corr_feature}** có ảnh hưởng tiêu cực nhất đến điểm chất lượng. Khi {max_corr_feature} tăng cao, chất lượng có xu hướng giảm xuống.")
 
-    # --- TAB 3: PHÂN TÍCH THEO ĐỘ DÀY & CẤP ĐỘ CHẤT LƯỢNG (CẬP NHẬT HIỂN THỊ SỐ LƯỢNG CUỘN) ---
+    # --- TAB 3: PHÂN TÍCH THEO ĐỘ DÀY & CẤP ĐỘ CHẤT LƯỢNG (DÙNG NORMAL CURVE LÝ THUYẾT) ---
     with tab3:
         st.header("3. So sánh Cơ tính phân rã theo Độ Dày và Cấp Độ")
-        st.markdown("Biểu đồ kết hợp cột dữ liệu thực tế (Histogram), đường xu hướng (KDE) và **đường nét đứt thể hiện giá trị Trung bình** của từng cấp độ. **Trục dọc (Y) thể hiện số lượng cuộn thép.**")
+        st.markdown("Biểu đồ cột thể hiện dữ liệu thực tế. **Các đường cong là phân phối chuẩn (Normal Bell Curve)** được tính toán toán học từ độ lệch chuẩn và giá trị trung bình của từng nhóm, loại bỏ nhiễu dữ liệu.")
         
         grade_mapping = {
             'A+B+ (Xuất sắc)': 'A+B+數',
@@ -94,20 +90,32 @@ if uploaded_file is not None:
         features = ['YS', 'TS', 'EL', 'YPE', 'HARDNESS']
         colors = ['#2ca02c', '#1f77b4', '#ff7f0e', '#9467bd', '#d62728'] 
         
-        # Lấy danh sách độ dày và sắp xếp
         thickness_list = df['厚度歸類'].dropna().unique()
         thickness_list = sorted(thickness_list, key=lambda x: str(x))
         num_thick = len(thickness_list)
         
         for feature in features:
             st.subheader(f"📊 Thông số: {feature}")
-            
             fig, axes = plt.subplots(nrows=1, ncols=num_thick, figsize=(5 * num_thick, 4.5), squeeze=False)
             
             for i, thickness in enumerate(thickness_list):
                 ax = axes[0, i]
                 df_thick = df[df['厚度歸類'] == thickness]
                 has_data = False
+                
+                # Tính toán khoảng chia (Bins) cố định cho toàn bộ độ dày này để các cấp độ vẽ đồng nhất
+                min_val = df_thick[feature].min()
+                max_val = df_thick[feature].max()
+                
+                if pd.notna(min_val) and pd.notna(max_val):
+                    if min_val == max_val: # Xử lý lỗi nếu các giá trị đều giống y hệt nhau
+                        min_val -= 1
+                        max_val += 1
+                    bins = np.linspace(min_val, max_val, 20)
+                    bin_width = bins[1] - bins[0]
+                else:
+                    bins = 20
+                    bin_width = 1
                 
                 # Vẽ từng cấp độ chất lượng
                 for (grade_label, grade_col), color in zip(grade_mapping.items(), colors):
@@ -116,28 +124,42 @@ if uploaded_file is not None:
                     
                     if len(temp_df) > 3: 
                         has_data = True
+                        values = temp_df[feature].values
+                        weights = temp_df[grade_col].values
+                        total_weight = weights.sum()
                         
-                        # 1. Vẽ phân bố dữ liệu thực (Histogram) + Đường cong (KDE)
+                        # 1. Vẽ phân bố dữ liệu thực (Histogram) - TẮT KDE
                         sns.histplot(
                             data=temp_df,
                             x=feature,
                             weights=grade_col,
                             label=grade_label,
                             color=color,
-                            kde=True,          # Bật đường cong mật độ
-                            stat="count",      # Dùng 'count' để trục Y hiện số lượng cuộn
-                            alpha=0.25,        # Độ trong suốt của cột
-                            linewidth=0.5,     # Viền của cột histogram
+                            bins=bins,         # Dùng chung số lượng cột để đều đẹp
+                            kde=False,         # Tắt KDE lởm chởm
+                            stat="count",      # Trục Y là số lượng cuộn
+                            alpha=0.25,
+                            linewidth=0.5,
                             ax=ax
                         )
                         
-                        # 2. Tính và vẽ đường Trung bình (Mean)
-                        values = temp_df[feature].values
-                        weights = temp_df[grade_col].values
-                        if weights.sum() > 0:
-                            weighted_mean = np.average(values, weights=weights)
-                            # Vẽ đường nét đứt dọc xuống
-                            ax.axvline(weighted_mean, color=color, linestyle='--', linewidth=1.5, alpha=0.9)
+                        # 2. Tính toán tham số Thống kê có trọng số
+                        weighted_mean = np.average(values, weights=weights)
+                        weighted_var = np.average((values - weighted_mean)**2, weights=weights)
+                        weighted_std = np.sqrt(weighted_var)
+                        
+                        # 3. Vẽ đường Phân phối chuẩn toán học (Normal Curve)
+                        if weighted_std > 0:
+                            x_axis = np.linspace(min_val, max_val, 150)
+                            # Tính PDF (Xác suất)
+                            pdf = stats.norm.pdf(x_axis, weighted_mean, weighted_std)
+                            # Quan trọng: Đổi hệ số PDF sang quy mô đếm số lượng cột (Count = PDF * Total_Weight * Bin_Width)
+                            scaled_pdf = pdf * total_weight * bin_width
+                            # Vẽ đường mượt mà
+                            ax.plot(x_axis, scaled_pdf, color=color, linewidth=2, alpha=0.9)
+                        
+                        # 4. Vẽ đường nét đứt Trung bình
+                        ax.axvline(weighted_mean, color=color, linestyle='--', linewidth=1.5, alpha=0.9)
                 
                 # Trang trí trục và tiêu đề
                 if has_data:
@@ -146,7 +168,7 @@ if uploaded_file is not None:
                     ax.set_ylabel("Số lượng cuộn" if i == 0 else "") 
                     ax.grid(axis='y', linestyle=':', alpha=0.6)
                     
-                    # Xử lý Legend: Chỉ hiển thị ở biểu đồ cuối cùng bên phải
+                    # Xử lý Legend (chỉ giữ lại phần label của histogram)
                     if i == num_thick - 1:
                         handles, labels = ax.get_legend_handles_labels()
                         unique_labels = list(grade_mapping.keys())
