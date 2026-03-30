@@ -305,37 +305,7 @@ if uploaded_file is not None:
                     ax2.set_title(f"Moving Range Chart for {feat}")
                     ax2.legend()
                     st.pyplot(fig)
-
-            # --- Success Probability Curves ---
-            pairs = [("YS","TS"), ("EL","YPE")]
-            target_grade = 'A-B+數'
-            for f1, f2 in pairs:
-                if f1 in df_t.columns and f2 in df_t.columns:
-                    st.markdown(f"### Success Probability Curves: {f1} & {f2}")
-                    fig, axes = plt.subplots(1, 2, figsize=(18, 5))
-                    for ax, feat in zip(axes, [f1, f2]):
-                        temp_opt = df_t[[feat, target_grade, 'Total_Count']].dropna()
-                        if len(temp_opt) > 0:
-                            temp_opt['bin'] = pd.qcut(temp_opt[feat], q=12, duplicates='drop')
-                            bin_res = temp_opt.groupby('bin', observed=True).agg({
-                                target_grade: 'sum',
-                                'Total_Count': 'sum'
-                            })
-                            bin_res['Success_Rate'] = (bin_res[target_grade] / bin_res['Total_Count'] * 100).fillna(0).round(0).astype(int)
-                            bin_res['Label'] = bin_res.index.map(lambda x: f"{x.left:.0f}-{x.right:.0f}")
-                            x_positions = np.arange(len(bin_res))
-                            
-                            ax.bar(x_positions, bin_res['Total_Count'], color='lightgray', alpha=0.5, label="Volume")
-                            ax2 = ax.twinx()
-                            ax2.plot(x_positions, bin_res['Success_Rate'], marker='o', color='green', lw=2, label="Success %")
-                            ax.set_xticks(x_positions)
-                            ax.set_xticklabels(bin_res['Label'], rotation=45, ha='right')
-                            ax.set_xlabel(feat)
-                            ax.set_ylabel("Volume", color='gray')
-                            ax2.set_ylabel("Success %", color='green')
-                            ax2.set_ylim(0, 105)
-                    st.pyplot(fig)
-                    st.markdown("---")
+    
 
         # --- NÚT XUẤT FILE TỔNG HỢP ---
         if all_export_data:
