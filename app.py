@@ -103,18 +103,18 @@ if uploaded_file is not None:
                 df_thick = df[df['厚度歸類'] == thickness]
                 has_data = False
                 
-                # Tính toán khoảng chia (Bins) cố định cho toàn bộ độ dày này để các cấp độ vẽ đồng nhất
+                # Tính toán khoảng chia (Bins) thay vì dùng mảng np.linspace gây lỗi
                 min_val = df_thick[feature].min()
                 max_val = df_thick[feature].max()
                 
                 if pd.notna(min_val) and pd.notna(max_val):
-                    if min_val == max_val: # Xử lý lỗi nếu các giá trị đều giống y hệt nhau
+                    if min_val == max_val: 
                         min_val -= 1
                         max_val += 1
-                    bins = np.linspace(min_val, max_val, 20)
-                    bin_width = bins[1] - bins[0]
+                    bin_range = (min_val, max_val)
+                    bin_width = (max_val - min_val) / 20  # Dùng 20 cột (bins=20)
                 else:
-                    bins = 20
+                    bin_range = None
                     bin_width = 1
                 
                 # Vẽ từng cấp độ chất lượng
@@ -128,16 +128,17 @@ if uploaded_file is not None:
                         weights = temp_df[grade_col].values
                         total_weight = weights.sum()
                         
-                        # 1. Vẽ phân bố dữ liệu thực (Histogram) - TẮT KDE
+                        # 1. Vẽ phân bố dữ liệu thực (Histogram)
                         sns.histplot(
                             data=temp_df,
                             x=feature,
                             weights=grade_col,
                             label=grade_label,
                             color=color,
-                            bins=bins,         # Dùng chung số lượng cột để đều đẹp
-                            kde=False,         # Tắt KDE lởm chởm
-                            stat="count",      # Trục Y là số lượng cuộn
+                            bins=20,                 # Đã sửa: Truyền số lượng cột
+                            binrange=bin_range,      # Đã sửa: Ép giới hạn khung cột
+                            kde=False,               
+                            stat="count",            
                             alpha=0.25,
                             linewidth=0.5,
                             ax=ax
@@ -150,14 +151,14 @@ if uploaded_file is not None:
                         
                         # 3. Vẽ đường Phân phối chuẩn toán học (Normal Curve)
                         if weighted_std > 0:
+                            # Khởi tạo dải X để vẽ đường cong
                             x_axis = np.linspace(min_val, max_val, 150)
-                            # Tính PDF (Xác suất)
                             pdf = stats.norm.pdf(x_axis, weighted_mean, weighted_std)
-                            # Quan trọng: Đổi hệ số PDF sang quy mô đếm số lượng cột (Count = PDF * Total_Weight * Bin_Width)
+                            # Đổi hệ số PDF sang quy mô đếm số lượng cột
                             scaled_pdf = pdf * total_weight * bin_width
                             # Vẽ đường mượt mà
                             ax.plot(x_axis, scaled_pdf, color=color, linewidth=2, alpha=0.9)
-                        
+                            
                         # 4. Vẽ đường nét đứt Trung bình
                         ax.axvline(weighted_mean, color=color, linestyle='--', linewidth=1.5, alpha=0.9)
                 
