@@ -152,7 +152,7 @@ if uploaded_file is not None:
 
     # --- TAB 4: SAFE WINDOW OPTIMIZATION ---
     with tab4:
-        st.header("4. Safe Operating Window by Thickness (with I-MR & Quality Level)")
+        st.header("4. Safe Operating Window by Thickness (with I-MR & Segment Quality)")
         sigma_factor = st.radio("Select Sigma Factor", [2.0, 2.5, 3.0], index=0)
 
         spec_limits = {
@@ -174,6 +174,7 @@ if uploaded_file is not None:
                 if len(vals) == 0:
                     continue
 
+                # loại bỏ ngoại lai (±3σ)
                 mean_val = np.mean(vals)
                 std_val = np.std(vals, ddof=1)
                 vals_clean = vals[(vals >= mean_val-3*std_val) & (vals <= mean_val+3*std_val)]
@@ -183,19 +184,22 @@ if uploaded_file is not None:
                 safe_val = mean_val - sigma_factor*std_val
                 low, high = spec_limits.get(feat, (None, None))
 
+                # Proposed Control Limit (±5% inside spec)
                 if low is not None and high is not None:
-                    ctrl_low = int(round(low + 0.05*(high-low)))
-                    ctrl_high = int(round(high - 0.05*(high-low)))
-                    ctrl_limit = f"{ctrl_low}–{ctrl_high}"
+                    ctrl_low = low + 0.05*(high-low)
+                    ctrl_high = high - 0.05*(high-low)
+                    ctrl_limit = f"{round(ctrl_low,2)}–{round(ctrl_high,2)}"
                 elif low is not None:
-                    ctrl_limit = f">={int(round(low+ (0.05*low)))}"
+                    ctrl_limit = f">={low+ (0.05*low):.2f}"
                 else:
                     ctrl_limit = "N/A"
 
+                # I-MR Control Limit
                 UCL_I = mean_val + sigma_factor*std_val
                 LCL_I = mean_val - sigma_factor*std_val
-                ctrl_imr = f"{int(round(LCL_I))}–{int(round(UCL_I))}"
+                ctrl_imr = f"{round(LCL_I,2)}–{round(UCL_I,2)}"
 
+                # Success Probability in Control Zone
                 target_grade = 'A-B+數'
                 temp_opt = df_t[[feat, target_grade, 'Total_Count']].dropna()
                 success_prob = None
@@ -205,17 +209,34 @@ if uploaded_file is not None:
                         target_grade: 'sum',
                         'Total_Count': 'sum'
                     })
-                    bin_res['Success_Rate'] = (bin_res[target_grade] / bin_res['Total_Count'] * 100).fillna(0).round(0).astype(int)
-                    
-                    # FIX: Explicitly cast 'Mid' to float to resolve TypeError during comparison
-                    bin_res['Mid'] = bin_res.index.map(lambda x: x.mid).astype(float)
-
+                    bin_res['Success_Rate'] = (bin_res[target_grade] / bin_res['Total_Count'] * 100).round(2)
+                    bin_res['Mid'] = bin_res.index.map(lambda x: x.mid)
                     bins_in_ctrl = bin_res[(bin_res['Mid'] >= LCL_I) & (bin_res['Mid'] <= UCL_I)]
                     if not bins_in_ctrl.empty:
                         success_prob = bins_in_ctrl['Success_Rate'].mean()
 
+                # Segment Distribution
+                seg_A_Bplusplus = df_t['A+B+數'].sum()
+                seg_A_Bplus = df_t['A-B+數'].sum()
+                seg_A_B = df_t['A-B數'].sum()
+                seg_A_Bminus = df_t['A-B-數'].sum()
+                seg_Bplus = df_t['B+數'].sum()
+                seg_total = seg_A_Bplusplus + seg_A_Bplus + seg_A_B + seg_A_Bminus + seg_Bplus
+
+                if seg_total > 0:
+                    seg_dist = (
+                        f"A+B+: {seg_A_Bplusplus/seg_total:.0%}, "
+                        f"A-B+: {seg_A_Bplus/seg_total:.0%}, "
+                        f"A-B: {seg_A_B/seg_total:.0%}, "
+                        f"A-B-: {seg_A_Bminus/seg_total:.0%}, "
+                        f"B+: {seg_Bplus/seg_total:.0%}"
+                    )
+                else:
+                    seg_dist = "N/A"
+
+                # Expected Quality Level
                 if success_prob is not None:
-                    if success_prob >= 70:
+                    if success_prob >= 70 and (seg_A_Bplusplus+seg_A_Bplus)/seg_total >= 0.75:
                         exp_quality = "A-B+"
                     elif success_prob >= 40:
                         exp_quality = "A-B"
@@ -232,80 +253,16 @@ if uploaded_file is not None:
 
                 status_list.append({
                     "Feature": feat,
-                    "Measured Mean": int(round(mean_val)),
-                    f"Safe Zone (Mean - {sigma_factor}σ)": int(round(safe_val)),
+                    "Measured Mean": round(mean_val, 2),
+                    f"Safe Zone (Mean - {sigma_factor}σ)": round(safe_val, 2),
                     "Spec Limit": f"{low}–{high}" if high else f">={low}",
                     "Proposed Control Limit": ctrl_limit,
                     "I-MR Control Limit": ctrl_imr,
-                    "Success Probability in Control Zone (%)": int(round(success_prob)) if success_prob else "N/A",
+                    "Success Probability in Control Zone (%)": round(success_prob,2) if success_prob else "N/A",
+                    "Segment Distribution (A+B+, A-B+, A-B, A-B-, B+)": seg_dist,
                     "Expected Quality Level": exp_quality,
                     "Status": status
                 })
 
             status_df = pd.DataFrame(status_list)
-            st.dataframe(status_df, use_container_width=True, hide_index=True)
-
-            # --- I-MR Chart ---
-            for feat in mech_features:
-                st.markdown(f"### I-MR Chart: {feat}")
-                vals = df_t[feat].dropna().values
-                if len(vals) > 1:
-                    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 6))
-                    mean_val = np.mean(vals)
-                    std_val = np.std(vals, ddof=1)
-                    UCL_I = mean_val + sigma_factor*std_val
-                    LCL_I = mean_val - sigma_factor*std_val
-
-                    ax1.plot(vals, marker='o', color='blue')
-                    ax1.axhline(mean_val, color='green', linestyle='--', label='Mean')
-                    ax1.axhline(UCL_I, color='red', linestyle='--', label=f'UCL I ({sigma_factor}σ)')
-                    ax1.axhline(LCL_I, color='red', linestyle='--', label=f'LCL I ({sigma_factor}σ)')
-                    ax1.set_title(f"Individuals Chart for {feat}")
-                    ax1.legend()
-
-                    MR = np.abs(np.diff(vals))
-                    MR_mean = np.mean(MR)
-                    d3, d4 = 0, 3.267
-                    UCL_MR = d4 * MR_mean
-                    LCL_MR = d3 * MR_mean
-                    ax2.plot(MR, marker='o', color='orange')
-                    ax2.axhline(MR_mean, color='green', linestyle='--', label='MR Mean')
-                    ax2.axhline(UCL_MR, color='red', linestyle='--', label='UCL MR')
-                    ax2.axhline(LCL_MR, color='red', linestyle='--', label='LCL MR')
-                    ax2.set_title(f"Moving Range Chart for {feat}")
-                    ax2.legend()
-                    st.pyplot(fig)
-
-            # --- Success Probability Curves ---
-            pairs = [("YS","TS"), ("EL","YPE")]
-            target_grade = 'A-B+數'
-            for f1, f2 in pairs:
-                if f1 in df_t.columns and f2 in df_t.columns:
-                    st.markdown(f"### Success Probability Curves: {f1} & {f2}")
-                    fig, axes = plt.subplots(1, 2, figsize=(18, 5))
-                    for ax, feat in zip(axes, [f1, f2]):
-                        temp_opt = df_t[[feat, target_grade, 'Total_Count']].dropna()
-                        if len(temp_opt) > 0:
-                            temp_opt['bin'] = pd.qcut(temp_opt[feat], q=12, duplicates='drop')
-                            bin_res = temp_opt.groupby('bin', observed=True).agg({
-                                target_grade: 'sum',
-                                'Total_Count': 'sum'
-                            })
-                            bin_res['Success_Rate'] = (bin_res[target_grade] / bin_res['Total_Count'] * 100).fillna(0).round(0).astype(int)
-                            bin_res['Label'] = bin_res.index.map(lambda x: f"{x.left:.0f}-{x.right:.0f}")
-                            x_positions = np.arange(len(bin_res))
-                            
-                            ax.bar(x_positions, bin_res['Total_Count'], color='lightgray', alpha=0.5, label="Volume")
-                            ax2 = ax.twinx()
-                            ax2.plot(x_positions, bin_res['Success_Rate'], marker='o', color='green', lw=2, label="Success %")
-                            ax.set_xticks(x_positions)
-                            ax.set_xticklabels(bin_res['Label'], rotation=45, ha='right')
-                            ax.set_xlabel(feat)
-                            ax.set_ylabel("Volume", color='gray')
-                            ax2.set_ylabel("Success %", color='green')
-                            ax2.set_ylim(0, 105)
-                    st.pyplot(fig)
-                    st.markdown("---")
-
-else:
-    st.info("Please upload an Excel file to start analysis.")
+            st.dataframe(status_df, use_container_width=True)
