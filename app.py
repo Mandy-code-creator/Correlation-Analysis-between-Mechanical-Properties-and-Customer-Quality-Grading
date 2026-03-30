@@ -48,12 +48,44 @@ if uploaded_file is not None:
         st.header("1. Thống kê Phân bổ Chất lượng tổng hợp")
         summary_df = df.groupby('厚度歸類')[count_cols].sum().reset_index()
         summary_df['Tổng cuộn kiểm tra'] = summary_df[count_cols].sum(axis=1)
-        summary_df['Tỉ lệ A+B+ (%)'] = (summary_df['A+B+數'] / summary_df['Tổng cuộn kiểm tra'] * 100).round(2)
         
-        col1, col2 = st.columns([1, 1])
+        # TÍNH TOÁN PHẦN TRĂM CHO TẤT CẢ CÁC CẤP ĐỘ
+        summary_df['% A+B+'] = (summary_df['A+B+數'] / summary_df['Tổng cuộn kiểm tra'] * 100).round(2)
+        summary_df['% A-B+'] = (summary_df['A-B+數'] / summary_df['Tổng cuộn kiểm tra'] * 100).round(2)
+        summary_df['% A-B'] = (summary_df['A-B數'] / summary_df['Tổng cuộn kiểm tra'] * 100).round(2)
+        summary_df['% A-B-'] = (summary_df['A-B-數'] / summary_df['Tổng cuộn kiểm tra'] * 100).round(2)
+        summary_df['% B+'] = (summary_df['B+數'] / summary_df['Tổng cuộn kiểm tra'] * 100).round(2)
+        
+        # Tạo tỷ lệ chia cột (Bảng số liệu chiếm 60% màn hình, Biểu đồ chiếm 40% màn hình) để đủ chỗ hiển thị bảng
+        col1, col2 = st.columns([1.5, 1])
+        
         with col1:
             st.subheader("Bảng số liệu tổng hợp theo Độ dày")
-            st.dataframe(summary_df, use_container_width=True)
+            
+            # FORMAT BẢNG ĐỂ HIỂN THỊ CHUYÊN NGHIỆP HƠN
+            display_df = summary_df.copy()
+            # Đổi tên cột từ tiếng Trung sang tiếng Việt viết tắt (SL = Số lượng)
+            display_df.rename(columns={
+                '厚度歸類': 'Độ dày',
+                'A+B+數': 'SL A+B+',
+                'A-B+數': 'SL A-B+',
+                'A-B數': 'SL A-B',
+                'A-B-數': 'SL A-B-',
+                'B+數': 'SL B+'
+            }, inplace=True)
+            
+            # Sắp xếp lại thứ tự: Cứ 1 cột Số lượng sẽ đi kèm 1 cột Phần trăm
+            display_cols = [
+                'Độ dày', 'Tổng cuộn kiểm tra', 
+                'SL A+B+', '% A+B+', 
+                'SL A-B+', '% A-B+', 
+                'SL A-B', '% A-B', 
+                'SL A-B-', '% A-B-', 
+                'SL B+', '% B+'
+            ]
+            
+            # Hiển thị bảng
+            st.dataframe(display_df[display_cols], use_container_width=True)
             
         with col2:
             st.subheader("Biểu đồ tỉ lệ phần trăm")
@@ -172,7 +204,6 @@ if uploaded_file is not None:
                 has_data = False
                 
                 for (grade_label, grade_col), color in zip(grade_mapping.items(), colors):
-                    # Lúc này temp_df đã hoàn toàn sạch bóng các giá trị <= 0
                     temp_df = df_thick[[feature, grade_col]].dropna()
                     temp_df = temp_df[temp_df[grade_col] > 0]
                     
