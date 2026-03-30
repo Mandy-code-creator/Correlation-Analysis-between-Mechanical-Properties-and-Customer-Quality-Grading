@@ -12,14 +12,14 @@ st.set_page_config(page_title="Mechanical Properties QC Dashboard", layout="wide
 st.title("📊 Mechanical Properties QC Analysis Dashboard")
 st.markdown("---")
 
-# --- 1. FILE UPLOAD ---
+# --- FILE UPLOAD ---
 uploaded_file = st.file_uploader("Upload your Excel data (.xlsx)", type=["xlsx"])
 
 if uploaded_file is not None:
     df = pd.read_excel(uploaded_file)
     df.columns = df.columns.str.strip()
 
-    # --- 2. DATA PREPROCESSING ---
+    # --- DATA PREPROCESSING ---
     count_cols = ['A+B+數', 'A-B+數', 'A-B數', 'A-B-數', 'B+數']
     count_cols = [col for col in count_cols if col in df.columns]
     for col in count_cols:
@@ -52,24 +52,19 @@ if uploaded_file is not None:
                                        "3. Weighted Distribution by Thickness",
                                        "4. Optimal Mechanical Limits"])
 
-    # --- TAB 1 ---
+    # --- TAB 1: SUMMARY ---
     with tab1:
         st.header("1. Summary by Thickness")
         summary_df = df.groupby('厚度歸類')[count_cols].sum().reset_index()
         summary_df['Total Coils'] = summary_df[count_cols].sum(axis=1)
-
         for col in count_cols:
             summary_df[f'% {col}'] = (summary_df[col] / summary_df['Total Coils'] * 100).round(2)
-
-        # Rename column for consistency
         summary_df.rename(columns={'厚度歸類': 'Thickness'}, inplace=True)
 
         col1, col2 = st.columns([1.5, 1])
         with col1:
             st.subheader("Summary Table")
             st.dataframe(summary_df, use_container_width=True)
-
-            # Download button
             towrite = io.BytesIO()
             summary_df.to_excel(towrite, index=False, engine='openpyxl')
             towrite.seek(0)
@@ -77,39 +72,36 @@ if uploaded_file is not None:
 
         with col2:
             st.subheader("Percentage Pie Charts")
-            plot_df = summary_df.set_index('Thickness')[count_cols]
-            plot_df.columns = ['A+B+', 'A-B+', 'A-B', 'A-B-', 'B+']
-            pie_colors = ['#2ca02c', '#1f77b4', '#ff7f0e', '#9467bd', '#d62728']
+            if 'Thickness' in summary_df.columns:
+                plot_df = summary_df.set_index('Thickness')[count_cols]
+                plot_df.columns = ['A+B+', 'A-B+', 'A-B', 'A-B-', 'B+']
+                pie_colors = ['#2ca02c', '#1f77b4', '#ff7f0e', '#9467bd', '#d62728']
+                thicknesses = plot_df.index
+                n_pies = len(thicknesses)
+                n_cols_pie = min(2, n_pies)
+                n_rows_pie = (n_pies + n_cols_pie - 1)//n_cols_pie
+                fig1, axes1 = plt.subplots(n_rows_pie, n_cols_pie, figsize=(14,7*n_rows_pie))
+                axes1_flat = np.array(axes1).flatten() if n_pies>1 else [axes1]
+                for i, thick in enumerate(thicknesses):
+                    ax = axes1_flat[i]
+                    data = plot_df.loc[thick]
+                    mask = data>0
+                    if mask.any():
+                        ax.pie(data[mask], autopct=lambda p:f'{p:.1f}%' if p>3 else '', startangle=90,
+                               colors=[c for c,m in zip(pie_colors,mask) if m], wedgeprops={'edgecolor':'white','linewidth':2},
+                               textprops={'fontsize':14,'fontweight':'bold'})
+                    ax.set_title(f"Thickness: {thick}", fontsize=18, fontweight='bold')
+                for j in range(i+1,len(axes1_flat)):
+                    axes1_flat[j].axis('off')
+                fig1.legend(plot_df.columns, title="Quality Grade", bbox_to_anchor=(1.0,0.5), loc="center left", fontsize=14, title_fontsize=16)
+                plt.tight_layout()
+                st.pyplot(fig1, use_container_width=True)
 
-            thicknesses = plot_df.index
-            n_pies = len(thicknesses)
-            n_cols_pie = min(2, n_pies)
-            n_rows_pie = (n_pies + n_cols_pie - 1) // n_cols_pie
-
-            fig1, axes1 = plt.subplots(n_rows_pie, n_cols_pie, figsize=(14, 7 * n_rows_pie))
-            axes1_flat = np.array(axes1).flatten() if n_pies > 1 else [axes1]
-
-            for i, thick in enumerate(thicknesses):
-                ax = axes1_flat[i]
-                data = plot_df.loc[thick]
-                mask = data > 0
-                if mask.any():
-                    ax.pie(data[mask], autopct=lambda p: f'{p:.1f}%' if p>3 else '', startangle=90, colors=[c for c,m in zip(pie_colors, mask) if m], wedgeprops={'edgecolor':'white','linewidth':2}, textprops={'fontsize':14,'fontweight':'bold'})
-                ax.set_title(f"Thickness: {thick}", fontsize=18, fontweight='bold')
-
-            for j in range(i+1, len(axes1_flat)):
-                axes1_flat[j].axis('off')
-
-            fig1.legend(plot_df.columns, title="Quality Grade", bbox_to_anchor=(1.0,0.5), loc="center left", fontsize=14, title_fontsize=16)
-            plt.tight_layout()
-            st.pyplot(fig1, use_container_width=True)
-
-    # --- TAB 2 ---
+    # --- TAB 2: CORRELATION ---
     with tab2:
         st.header("2. Correlation Matrix")
-        corr_matrix = df[['Quality_Score'] + mech_features].corr()[['Quality_Score']].drop('Quality_Score')
+        corr_matrix = df[['Quality_Score']+mech_features].corr()[['Quality_Score']].drop('Quality_Score')
         corr_matrix.columns = ['Correlation with Total Quality Score']
-
         col_corr1, col_corr2 = st.columns([1,2])
         with col_corr1:
             st.subheader("Pearson Correlation")
@@ -120,7 +112,7 @@ if uploaded_file is not None:
                 max_corr_feature = corr_matrix.idxmin()[0]
                 st.info(f"Parameter **{max_corr_feature}** has the most negative effect on total quality score.")
 
-    # --- TAB 3 ---
+    # --- TAB 3: DISTRIBUTION ---
     with tab3:
         st.header("3. Weighted Distribution by Thickness")
         grade_mapping = {
@@ -137,7 +129,6 @@ if uploaded_file is not None:
             with st.expander(f"📊 Distribution: {feature}", expanded=False):
                 fig, axes = plt.subplots(len(thickness_list), 1, figsize=(16,6*len(thickness_list)))
                 axes = axes if len(thickness_list) >1 else [axes]
-
                 for i, thickness in enumerate(thickness_list):
                     ax = axes[i]
                     df_thick = df[df['厚度歸類']==thickness]
@@ -173,42 +164,40 @@ if uploaded_file is not None:
                 plt.tight_layout()
                 st.pyplot(fig, use_container_width=True)
 
-    # --- TAB 4 ---
+    # --- TAB 4: OPTIMAL LIMITS BASED ON QUALITY PERCENTAGE ---
     with tab4:
-        st.header("4. Optimal Mechanical Limits")
-        limits = []
+        st.header("4. Optimal Mechanical Limits based on Quality Grades")
+        optimal_limits = []
         for feat in mech_features:
             all_vals = []
+            all_weights = []
             for grade_col in count_cols:
                 if grade_col not in df.columns: continue
                 mask = df[grade_col]>0
-                if mask.any():
-                    vals = df.loc[mask, feat]
-                    vals = vals[~vals.isna() & (vals>0)]
-                    w = df.loc[vals.index, grade_col].values
-                    all_vals.extend(np.repeat(vals.values, w.astype(int)))
-            valid_all_vals = [v for v in all_vals if not np.isnan(v) and v>0]
-            if len(valid_all_vals) > 0:
-                arr = np.array(valid_all_vals)
-                lower = np.percentile(arr,2.5)
-                upper = np.percentile(arr,97.5)
-                mean = np.average(arr)
-                std = np.std(arr)
-                current = current_limits.get(feat, {})
-                limits.append({
+                vals = df.loc[mask, feat]
+                vals = vals[~vals.isna() & (vals>0)]
+                w = df.loc[vals.index, grade_col].values
+                all_vals.extend(vals.values)
+                all_weights.extend(w)
+            if len(all_vals) >0:
+                weighted_vals = np.repeat(all_vals, np.array(all_weights).astype(int))
+                lower_opt = np.percentile(weighted_vals,2.5)
+                upper_opt = np.percentile(weighted_vals,97.5)
+                mean_val = np.average(weighted_vals)
+                std_val = np.std(weighted_vals)
+                current = current_limits.get(feat,{})
+                optimal_limits.append({
                     'Parameter':feat,
-                    'Lower Limit (Optimal)':lower,
-                    'Upper Limit (Optimal)':upper,
-                    'Weighted Mean':mean,
-                    'Weighted Std':std,
+                    'Lower Limit (Optimal)':lower_opt,
+                    'Upper Limit (Optimal)':upper_opt,
+                    'Weighted Mean':mean_val,
+                    'Weighted Std':std_val,
                     'Current Lower Limit': current.get('Lower', None),
                     'Current Upper Limit': current.get('Upper', None)
                 })
-            else:
-                st.warning(f"Feature {feat} does not have enough valid data to compute limits.")
-        limits_df = pd.DataFrame(limits)
-        st.dataframe(limits_df, use_container_width=True)
-        st.markdown("*Optimal limits are based on weighted 2.5%–97.5% percentile of actual distribution and compared with current control limits.*")
+        opt_df = pd.DataFrame(optimal_limits)
+        st.dataframe(opt_df, use_container_width=True)
+        st.markdown("*Optimal limits are derived from weighted 2.5%–97.5% percentile of actual distribution based on quality grades.*")
 
 else:
-    st.info("Please upload your Excel data to start analysis.")
+    st.info("Please upload your Excel file to start analysis.")
