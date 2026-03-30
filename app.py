@@ -27,13 +27,11 @@ if uploaded_file is not None:
     # --- 2. DATA PREPROCESSING ---
     count_cols = ['A+B+數', 'A-B+數', 'A-B數', 'A-B-數', 'B+數']
     count_cols = [col for col in count_cols if col in df.columns]
-    
     for col in count_cols:
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
     mech_features = ['YS', 'TS', 'EL', 'YPE', 'HARDNESS']
     mech_features = [feat for feat in mech_features if feat in df.columns]
-    
     for feat in mech_features:
         df[feat] = pd.to_numeric(df[feat], errors='coerce')
         df.loc[df[feat] <= 0, feat] = np.nan
@@ -161,4 +159,4 @@ if uploaded_file is not None:
                 bin_res['Success_Rate'] = (bin_res[target_grade] / bin_res['Total_Count'] * 100).round(2)
                 bin_res['Mid'] = bin_res.index.map(lambda x: x.mid)
                 avg_rate = bin_res['Success_Rate'].mean()
-                safe_bins = bin_res[bin_res['Success
+                safe_bins = bin_res[bin_res['Success_Rate
