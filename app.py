@@ -9,44 +9,105 @@ import math
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="QC Mechanical Properties Dashboard", layout="wide")
-st.title("📊 QC Mechanical Properties Analysis - Clear View Updates")
+
+st.title("📊 QC Mechanical Properties Analysis - Full Comprehensive View")
 st.markdown("---")
 
 # --- 1. FILE UPLOAD ---
 uploaded_file = st.file_uploader("Upload Excel file (.xlsx)", type=["xlsx"])
 
 if uploaded_file is not None:
+    # Read data
     df = pd.read_excel(uploaded_file)
     df.columns = df.columns.str.strip() 
 
     # --- 2. DATA PREPROCESSING ---
     count_cols = ['A+B+數', 'A-B+數', 'A-B數', 'A-B-數', 'B+數']
     count_cols = [col for col in count_cols if col in df.columns]
+    
     for col in count_cols:
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
+    # Mechanical properties
     mech_features = ['YS', 'TS', 'EL', 'YPE', 'HARDNESS']
     mech_features = [feat for feat in mech_features if feat in df.columns]
+    
     for feat in mech_features:
         df[feat] = pd.to_numeric(df[feat], errors='coerce')
+        # Filter out 0 or negative to avoid noise in distribution
         df.loc[df[feat] <= 0, feat] = np.nan
 
     df['Total_Count'] = df[count_cols].sum(axis=1)
     df = df[df['Total_Count'] > 0].copy()
 
-    # Calculate Overall Quality Score
+    # Calculate Overall Quality Score for Correlation
     df['Quality_Score'] = (5*df.get('A+B+數', 0) + 4*df.get('A-B+數', 0) + 3*df.get('A-B數', 0) +
                            2*df.get('A-B-數', 0) + 1*df.get('B+數', 0)) / df['Total_Count']
 
-    # --- TABS ---
-    tab1, tab2, tab3 = st.tabs(["1. Summary", "2. Correlation", "3. Distribution Analysis (Clear View)"])
+    # --- 3. CREATE TABS ---
+    tab1, tab2, tab3 = st.tabs([
+        "1. Summary & Pie Charts", 
+        "2. Correlation Analysis", 
+        "3. Distribution Analysis (Sturges & Extended Tails)"
+    ])
 
-    # (Tab 1 & 2 remain unchanged, omitted for clarity)
+    # --- TAB 1: SUMMARY & PIE CHARTS ---
+    with tab1:
+        st.header("1. Summary by Thickness")
+        summary_df = df.groupby('厚度歸類')[count_cols].sum().reset_index()
+        summary_df['Total Coils'] = summary_df[count_cols].sum(axis=1)
+        
+        for col in count_cols:
+            summary_df[f"% {col}"] = (summary_df[col]/summary_df['Total Coils']*100).round(2)
+            
+        col_t1, col_t2 = st.columns([1.5, 1])
+        with col_t1:
+            st.subheader("Data Summary Table")
+            display_df = summary_df.copy()
+            display_df.rename(columns={'厚度歸類': 'Thickness'}, inplace=True)
+            st.dataframe(display_df, use_container_width=True)
+            
+            # Export simple summary to Excel
+            towrite = io.BytesIO()
+            display_df.to_excel(towrite, index=False, engine='openpyxl')
+            towrite.seek(0)
+            st.download_button("📥 Download Summary Excel", data=towrite, file_name="QC_Summary.xlsx")
 
-    # --- TAB 3: DISTRIBUTION ANALYSIS (FIXED OVERLAP & TAILS) ---
+        with col_t2:
+            st.subheader("Quality Proportion Pie Charts")
+            plot_df = summary_df.set_index('厚度歸類')[count_cols]
+            plot_df.columns = ['A+B+', 'A-B+', 'A-B', 'A-B-', 'B+']
+            pie_colors = ['#2ca02c', '#1f77b4', '#ff7f0e', '#9467bd', '#d62728']
+
+            n_pies = len(plot_df)
+            if n_pies > 0:
+                fig_pie, axes_pie = plt.subplots((n_pies+1)//2, min(2, n_pies), figsize=(14, 6 * ((n_pies+1)//2)))
+                axes_pie_flat = np.array(axes_pie).flatten() if n_pies > 1 else [axes_pie]
+                for i, thick in enumerate(plot_df.index):
+                    ax_p = axes_pie_flat[i]
+                    data_p = plot_df.loc[thick]
+                    mask_p = data_p > 0
+                    ax_p.pie(data_p[mask_p], autopct=lambda p: f'{p:.1f}%' if p>3 else '', startangle=90, 
+                             colors=[c for c,m in zip(pie_colors, mask_p) if m], 
+                             wedgeprops={'edgecolor':'white','linewidth':2}, 
+                             textprops={'fontsize':12,'fontweight':'bold'})
+                    ax_p.set_title(f"Thickness: {thick}", fontsize=16, fontweight='bold')
+                for j in range(i+1, len(axes_pie_flat)): axes_pie_flat[j].axis('off')
+                fig_pie.legend(plot_df.columns, title="Quality Grade", loc="center right")
+                st.pyplot(fig_pie)
+
+    # --- TAB 2: CORRELATION MATRIX ---
+    with tab2:
+        st.header("2. Correlation Analysis")
+        corr_matrix = df[['Quality_Score'] + mech_features].corr()[['Quality_Score']].drop('Quality_Score')
+        corr_matrix.columns = ['Quality Correlation Index']
+        st.dataframe(corr_matrix.style.background_gradient(cmap='coolwarm', axis=0), use_container_width=True)
+        st.info("💡 High positive values mean the property helps quality. Negative values mean it might hurt quality.")
+
+    # --- TAB 3: DISTRIBUTION (CLEAR VIEW & EXTENDED TAILS) ---
     with tab3:
-        st.header("3. Distribution Analysis (Clear View - Sturges)")
-        st.markdown("Normal Curves are now extended to $\pm 4\sigma$ for theoretical range. Mean labels are automatically re-arranged to prevent overlap.")
+        st.header("3. Distribution Analysis (Sturges Rule & Extended Tails)")
+        st.markdown("Normal curves now cover $\pm 4\sigma$ theoretical range. Labels are auto-positioned.")
         
         grade_mapping = {'A+B+': 'A+B+數', 'A-B+': 'A-B+數', 'A-B': 'A-B數', 'A-B-': 'A-B-數', 'B+': 'B+數'}
         colors = ['#2ca02c', '#1f77b4', '#ff7f0e', '#9467bd', '#d62728']
@@ -54,92 +115,72 @@ if uploaded_file is not None:
 
         for feature in mech_features:
             st.markdown(f"### 📊 Distribution of **{feature}**")
-            fig, axes = plt.subplots(len(thickness_list), 1, figsize=(16, 7 * len(thickness_list)))
+            fig, axes = plt.subplots(len(thickness_list), 1, figsize=(16, 8 * len(thickness_list)))
             axes = axes if len(thickness_list) > 1 else [axes]
 
             for i, thick in enumerate(thickness_list):
                 ax = axes[i]
                 df_t = df[df['厚度歸類'] == thick]
-                N = df_t['Total_Count'].sum()
+                N_total = df_t['Total_Count'].sum()
                 
-                # Sturges Bins
-                k_bins = int(1 + 3.322 * math.log10(N)) if N > 0 else 10
+                # Sturges Binning
+                k_bins = int(1 + 3.322 * math.log10(N_total)) if N_total > 0 else 10
                 k_bins = max(k_bins, 5)
                 
-                # List to store mean values and colors for label management
-                mean_labels_info = []
+                mean_info_list = []
 
-                for (label, col), color in zip(grade_mapping.items(), colors):
-                    temp = df_t[[feature, col]].dropna()
-                    temp = temp[temp[col] > 0]
-                    if len(temp) > 2:
-                        vals, wgts = temp[feature].values, temp[col].values
+                for (label, col_name), color in zip(grade_mapping.items(), colors):
+                    temp_data = df_t[[feature, col_name]].dropna()
+                    temp_data = temp_data[temp_data[col_name] > 0]
+                    
+                    if len(temp_data) > 2:
+                        vals = temp_data[feature].values
+                        wgts = temp_data[col_name].values
                         
-                        # sns.histplot using fixed bins
-                        sns.histplot(x=vals, weights=wgts, label=label, color=color, bins=k_bins, stat='count', alpha=0.15, ax=ax, edgecolor='none')
+                        # Histogram
+                        sns.histplot(x=vals, weights=wgts, label=label, color=color, bins=k_bins, 
+                                     stat='count', alpha=0.15, ax=ax, edgecolor='none')
                         
-                        m = np.average(vals, weights=wgts)
-                        s = np.sqrt(np.average((vals-m)**2, weights=wgts))
+                        # Statistics
+                        m_val = np.average(vals, weights=wgts)
+                        s_val = np.sqrt(np.average((vals - m_val)**2, weights=wgts))
                         
-                        # --- FIX: Extend Normal Curve Tails to 4*sigma ---
-                        if s > 0:
-                            # Generate X axis based on theoretical 4-sigma range, not just data min/max
-                            x_extended = np.linspace(m - 4*s, m + 4*s, 200)
-                            
-                            # Scaling the Normal Curve to match Histogram 'count' scale
-                            bin_w = (vals.max() - vals.min()) / k_bins
-                            ax.plot(x_extended, stats.norm.pdf(x_extended, m, s) * wgts.sum() * bin_w, color=color, lw=2.5, alpha=0.9)
+                        # --- EXTENDED NORMAL CURVE TAILS ---
+                        if s_val > 0:
+                            # 4-sigma range for theoretical tail visualization
+                            x_range = np.linspace(m_val - 4*s_val, m_val + 4*s_val, 200)
+                            bin_w = (vals.max() - vals.min()) / k_bins if vals.max() != vals.min() else 1
+                            ax.plot(x_range, stats.norm.pdf(x_range, m_val, s_val) * wgts.sum() * bin_w, 
+                                    color=color, lw=3, alpha=0.85)
                         
-                        # Draw Mean Line
-                        ax.axvline(m, color=color, ls='--', lw=2)
-                        
-                        # Store mean info for non-overlapping label placement
-                        mean_labels_info.append({'val': m, 'color': color})
+                        # Mean Line
+                        ax.axvline(m_val, color=color, ls='--', lw=2)
+                        mean_info_list.append({'val': m_val, 'color': color})
 
-                # --- FIX: Tự động sắp xếp nhãn giá trị trung bình để không ghi đè ---
-                if mean_labels_info:
-                    # Sắp xếp theo giá trị để dễ xử lý chồng chéo
-                    mean_labels_info.sort(key=lambda x: x['val'])
+                # --- ANTI-OVERLAP LABEL LOGIC ---
+                if mean_info_list:
+                    mean_info_list.sort(key=lambda x: x['val'])
+                    y_max_limit = ax.get_ylim()[1]
                     
-                    y_max = ax.get_ylim()[1]
-                    y_positions = []
-                    y_start_pct = 0.93  # Bắt đầu ở độ cao 93% trục Y
-                    
-                    # Xác định độ cao cho từng nhãn
-                    for info in mean_labels_info:
-                        if not y_positions:
-                            y_positions.append(y_start_pct * y_max)
-                        else:
-                            # Nếu nhãn này quá gần nhãn trước (trong khoảng 4% dải Y), đẩy nó xuống
-                            # (Thay đổi logic so sánh Y-axis sang X-axis để chính xác hơn)
-                            pass
-
-                    # Logic mới đơn giản hơn: Sắp xếp các nhãn theo 2 độ cao khác nhau luân phiên
-                    # (Điều này giải quyết 80% trường hợp chồng chéo dữ liệu cơ tính)
-                    y_high = y_start_pct * y_max
-                    y_low = (y_start_pct - 0.08) * y_max  # Thấp hơn 8%
-                    
-                    for idx, info in enumerate(mean_labels_info):
-                        # Các nhãn lẻ nằm cao, các nhãn chẵn nằm thấp
-                        y_pos = y_high if idx % 2 == 0 else y_low
-                        
+                    for idx, info in enumerate(mean_info_list):
+                        # Alternating heights to avoid text overlap
+                        y_pos = (0.94 if idx % 2 == 0 else 0.85) * y_max_limit
                         ax.text(info['val'], y_pos, f"{info['val']:.1f}", 
-                                color=info['color'], fontsize=11, fontweight='bold',
-                                horizontalalignment='center',
-                                bbox=dict(facecolor='white', alpha=0.7, edgecolor='none'))
+                                color=info['color'], fontsize=12, fontweight='bold',
+                                ha='center', bbox=dict(facecolor='white', alpha=0.7, edgecolor='none'))
 
-                ax.set_title(f"Thickness: {thick} (N={int(N)}, Bins={k_bins})", fontsize=16, fontweight='bold')
-                ax.grid(axis='y', linestyle=':', alpha=0.7)
+                ax.set_title(f"Thickness: {thick} (N={int(N_total)}, Sturges Bins={k_bins})", fontsize=18, fontweight='bold')
+                ax.set_ylabel("Coil Count")
+                ax.grid(axis='y', linestyle=':', alpha=0.6)
                 
-                # --- FIX: Legend placement (Move outside top-right) ---
+                # Legend placement outside
                 handles, labels = ax.get_legend_handles_labels()
-                # Remove duplicate Normal Curve lines from legend if any
                 by_label = dict(zip(labels, handles))
                 ax.legend(by_label.values(), by_label.keys(), title="Quality Grade", 
-                          bbox_to_anchor=(1.02, 1), loc='upper left', ncol=1, fontsize=10)
+                          bbox_to_anchor=(1.01, 1), loc='upper left')
                 
             plt.tight_layout()
             st.pyplot(fig)
 
 else:
-    st.info("Please upload an Excel file.")
+    st.info("Please upload an Excel file to see all views.")
