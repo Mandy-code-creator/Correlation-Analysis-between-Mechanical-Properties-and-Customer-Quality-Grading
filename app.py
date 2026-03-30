@@ -112,57 +112,85 @@ if uploaded_file is not None:
                 max_corr_feature = corr_matrix.idxmin()[0]
                 st.info(f"Parameter **{max_corr_feature}** has the most negative effect on total quality score.")
 
-    # --- TAB 3: DISTRIBUTION ---
-    with tab3:
-        st.header("3. Weighted Distribution by Thickness")
-        grade_mapping = {
-            'A+B+ (Excellent)': 'A+B+數',
-            'A-B+ (Good)': 'A-B+數',
-            'A-B (Average)': 'A-B數',
-            'A-B- (Poor)': 'A-B-數',
-            'B+ (Reject)': 'B+數'
-        }
-        colors = ['#2ca02c','#1f77b4','#ff7f0e','#9467bd','#d62728']
-        thickness_list = sorted(df['厚度歸類'].dropna().unique(), key=str)
+    # --- TAB 3: DISTRIBUTION WITH OPTIMAL LIMITS ---
+with tab3:
+    st.header("3. Weighted Distribution by Thickness with Optimal Limits")
+    grade_mapping = {
+        'A+B+ (Excellent)': 'A+B+數',
+        'A-B+ (Good)': 'A-B+數',
+        'A-B (Average)': 'A-B數',
+        'A-B- (Poor)': 'A-B-數',
+        'B+ (Reject)': 'B+數'
+    }
+    colors = ['#2ca02c','#1f77b4','#ff7f0e','#9467bd','#d62728']
+    thickness_list = sorted(df['厚度歸類'].dropna().unique(), key=str)
 
-        for feature in mech_features:
-            with st.expander(f"📊 Distribution: {feature}", expanded=False):
-                fig, axes = plt.subplots(len(thickness_list), 1, figsize=(16,6*len(thickness_list)))
-                axes = axes if len(thickness_list) >1 else [axes]
-                for i, thickness in enumerate(thickness_list):
-                    ax = axes[i]
-                    df_thick = df[df['厚度歸類']==thickness]
-                    has_data = False
-                    for (grade_label, grade_col), color in zip(grade_mapping.items(), colors):
-                        if grade_col not in df_thick.columns: continue
-                        temp_df = df_thick[[feature, grade_col]].dropna()
-                        temp_df = temp_df[temp_df[grade_col]>0]
-                        temp_vals = temp_df[feature][~temp_df[feature].isna() & (temp_df[feature]>0)]
-                        if len(temp_vals) > 3:
-                            has_data = True
-                            values = temp_vals.values
-                            weights = temp_df.loc[temp_vals.index, grade_col].values
-                            total_weight = weights.sum()
-                            sns.histplot(temp_df, x=feature, weights=grade_col, label=grade_label, color=color, bins=20, kde=False, stat='count', alpha=0.3, ax=ax)
-                            weighted_mean = np.average(values, weights=weights)
-                            weighted_std = np.sqrt(np.average((values-weighted_mean)**2, weights=weights))
-                            if weighted_std>0:
-                                x_axis = np.linspace(values.min(), values.max(),150)
-                                pdf = stats.norm.pdf(x_axis, weighted_mean, weighted_std)
-                                scaled_pdf = pdf * total_weight * ((values.max()-values.min())/20)
-                                ax.plot(x_axis, scaled_pdf, color=color, linewidth=3, alpha=0.8)
-                            ax.axvline(weighted_mean, color=color, linestyle='--', linewidth=2, alpha=0.8)
-                    if has_data:
-                        ax.set_title(f"Thickness: {thickness}")
-                        ax.set_xlabel(feature)
-                        ax.set_ylabel("Number of Coils")
-                        ax.grid(axis='y', linestyle=':', alpha=0.7)
-                        ax.legend(title="Quality Grade")
-                    else:
-                        ax.set_title(f"Thickness: {thickness} - Not enough data", color='gray')
-                        ax.axis('off')
-                plt.tight_layout()
-                st.pyplot(fig, use_container_width=True)
+    # Nếu Tab 4 đã tính Optimal Limits
+    optimal_limits_dict = {row['Parameter']:(row['Lower Limit (Optimal)'], row['Upper Limit (Optimal)'])
+                           for idx,row in opt_df.iterrows()} if 'opt_df' in locals() else {}
+
+    for feature in mech_features:
+        with st.expander(f"📊 Distribution: {feature}", expanded=True):
+            fig, axes = plt.subplots(len(thickness_list), 1, figsize=(16,6*len(thickness_list)))
+            axes = axes if len(thickness_list)>1 else [axes]
+
+            for i, thickness in enumerate(thickness_list):
+                ax = axes[i]
+                df_thick = df[df['厚度歸類']==thickness]
+                has_data = False
+
+                for (grade_label, grade_col), color in zip(grade_mapping.items(), colors):
+                    if grade_col not in df_thick.columns: continue
+                    temp_df = df_thick[[feature, grade_col]].dropna()
+                    temp_df = temp_df[temp_df[grade_col]>0]
+                    temp_vals = temp_df[feature][~temp_df[feature].isna() & (temp_df[feature]>0)]
+                    if len(temp_vals)>3:
+                        has_data=True
+                        values = temp_vals.values
+                        weights = temp_df.loc[temp_vals.index, grade_col].values
+                        total_weight = weights.sum()
+                        sns.histplot(temp_df, x=feature, weights=grade_col, label=grade_label,
+                                     color=color, bins=20, kde=False, stat='count', alpha=0.3, ax=ax)
+
+                        weighted_mean = np.average(values, weights=weights)
+                        weighted_std = np.sqrt(np.average((values-weighted_mean)**2, weights=weights))
+                        if weighted_std>0:
+                            x_axis = np.linspace(values.min(), values.max(),150)
+                            pdf = stats.norm.pdf(x_axis, weighted_mean, weighted_std)
+                            scaled_pdf = pdf * total_weight * ((values.max()-values.min())/20)
+                            ax.plot(x_axis, scaled_pdf, color=color, linewidth=3, alpha=0.8)
+                        ax.axvline(weighted_mean, color=color, linestyle='--', linewidth=2, alpha=0.8)
+
+                # Vẽ đường giới hạn tối ưu từ Tab 4
+                if feature in optimal_limits_dict:
+                    lower_opt, upper_opt = optimal_limits_dict[feature]
+                    ax.axvline(lower_opt, color='black', linestyle='-', linewidth=2, label='Lower Optimal')
+                    ax.axvline(upper_opt, color='black', linestyle='-.', linewidth=2, label='Upper Optimal')
+
+                    # Gán nhãn gần đúng cấp độ
+                    closest_grade_lower = None
+                    closest_grade_upper = None
+                    for grade_label, grade_col in grade_mapping.items():
+                        vals = df_thick[feature][df_thick[grade_col]>0]
+                        if len(vals)>0:
+                            if closest_grade_lower is None or np.abs(vals.min()-lower_opt)<np.abs(vals.min()-closest_grade_lower[1]):
+                                closest_grade_lower = (grade_label, vals.min())
+                            if closest_grade_upper is None or np.abs(vals.max()-upper_opt)<np.abs(vals.max()-closest_grade_upper[1]):
+                                closest_grade_upper = (grade_label, vals.max())
+                    ax.text(lower_opt, ax.get_ylim()[1]*0.9, f'Lower ≈ {closest_grade_lower[0]}' if closest_grade_lower else '', color='black', fontsize=12, rotation=90, verticalalignment='top')
+                    ax.text(upper_opt, ax.get_ylim()[1]*0.9, f'Upper ≈ {closest_grade_upper[0]}' if closest_grade_upper else '', color='black', fontsize=12, rotation=90, verticalalignment='top')
+
+                if has_data:
+                    ax.set_title(f"Thickness: {thickness}")
+                    ax.set_xlabel(feature)
+                    ax.set_ylabel("Number of Coils")
+                    ax.grid(axis='y', linestyle=':', alpha=0.7)
+                    ax.legend(title="Quality Grade / Optimal Limit")
+                else:
+                    ax.set_title(f"Thickness: {thickness} - Not enough data", color='gray')
+                    ax.axis('off')
+            plt.tight_layout()
+            st.pyplot(fig, use_container_width=True)
 
     # --- TAB 4: OPTIMAL LIMITS BASED ON QUALITY PERCENTAGE ---
     with tab4:
