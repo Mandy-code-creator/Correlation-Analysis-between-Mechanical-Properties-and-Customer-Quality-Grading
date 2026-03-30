@@ -49,12 +49,25 @@ if uploaded_file is not None:
         with col2:
             st.subheader("Biểu đồ tỉ lệ phần trăm")
             fig1, ax1 = plt.subplots(figsize=(8, 4))
-            summary_df.set_index('厚度歸類')[count_cols].apply(lambda x: x*100/sum(x), axis=1).plot(
-                kind='bar', stacked=True, ax=ax1, colormap='RdYlGn_r'
-            )
+            
+            # XỬ LÝ LỖI FONT & VẼ BIỂU ĐỒ
+            # 1. Tạo dataframe tỷ lệ và đổi tên cột để tránh lỗi tiếng Trung
+            plot_df = summary_df.set_index('厚度歸類')[count_cols].apply(lambda x: x*100/sum(x), axis=1)
+            plot_df.columns = ['A+B+', 'A-B+', 'A-B', 'A-B-', 'B+']
+            
+            # 2. Vẽ biểu đồ Stacked Bar
+            plot_df.plot(kind='bar', stacked=True, ax=ax1, colormap='RdYlGn_r', edgecolor='white', linewidth=0.5)
             ax1.set_ylabel("Tỉ lệ (%)")
-            ax1.set_xlabel("Độ dày (厚度歸類)")
-            plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+            ax1.set_xlabel("Độ dày") # Đổi tên trục X để sửa lỗi font
+            
+            # 3. THÊM SỐ PHẦN TRĂM VÀO GIỮA CỘT
+            for container in ax1.containers:
+                # Điều kiện: Chỉ in số nếu chiều cao (tỉ lệ %) > 3% để tránh đè chữ
+                labels = [f"{v.get_height():.1f}%" if v.get_height() > 3 else "" for v in container]
+                ax1.bar_label(container, labels=labels, label_type='center', fontsize=9, fontweight='bold', color='#333333')
+            
+            # Cấu hình lại chú thích (Legend)
+            plt.legend(title="Cấp độ", bbox_to_anchor=(1.05, 1), loc='upper left')
             st.pyplot(fig1)
 
     # --- TAB 2: MA TRẬN TƯƠNG QUAN ---
@@ -75,7 +88,7 @@ if uploaded_file is not None:
             max_corr_feature = corr_matrix.idxmin()[0]
             st.info(f"Dựa trên dữ liệu, thông số **{max_corr_feature}** có ảnh hưởng tiêu cực nhất đến điểm chất lượng. Khi {max_corr_feature} tăng cao, chất lượng có xu hướng giảm xuống.")
 
-    # --- TAB 3: PHÂN TÍCH THEO ĐỘ DÀY & CẤP ĐỘ CHẤT LƯỢNG (DÙNG NORMAL CURVE LÝ THUYẾT) ---
+    # --- TAB 3: PHÂN TÍCH THEO ĐỘ DÀY & CẤP ĐỘ CHẤT LƯỢNG (NORMAL CURVE) ---
     with tab3:
         st.header("3. So sánh Cơ tính phân rã theo Độ Dày và Cấp Độ")
         st.markdown("Biểu đồ cột thể hiện dữ liệu thực tế. **Các đường cong là phân phối chuẩn (Normal Bell Curve)** được tính toán toán học từ độ lệch chuẩn và giá trị trung bình của từng nhóm, loại bỏ nhiễu dữ liệu.")
@@ -103,7 +116,6 @@ if uploaded_file is not None:
                 df_thick = df[df['厚度歸類'] == thickness]
                 has_data = False
                 
-                # Tính toán khoảng chia (Bins) thay vì dùng mảng np.linspace gây lỗi
                 min_val = df_thick[feature].min()
                 max_val = df_thick[feature].max()
                 
@@ -112,12 +124,11 @@ if uploaded_file is not None:
                         min_val -= 1
                         max_val += 1
                     bin_range = (min_val, max_val)
-                    bin_width = (max_val - min_val) / 20  # Dùng 20 cột (bins=20)
+                    bin_width = (max_val - min_val) / 20  
                 else:
                     bin_range = None
                     bin_width = 1
                 
-                # Vẽ từng cấp độ chất lượng
                 for (grade_label, grade_col), color in zip(grade_mapping.items(), colors):
                     temp_df = df_thick[[feature, grade_col]].dropna()
                     temp_df = temp_df[temp_df[grade_col] > 0]
@@ -128,15 +139,15 @@ if uploaded_file is not None:
                         weights = temp_df[grade_col].values
                         total_weight = weights.sum()
                         
-                        # 1. Vẽ phân bố dữ liệu thực (Histogram)
+                        # Vẽ phân bố dữ liệu thực (Histogram)
                         sns.histplot(
                             data=temp_df,
                             x=feature,
                             weights=grade_col,
                             label=grade_label,
                             color=color,
-                            bins=20,                 # Đã sửa: Truyền số lượng cột
-                            binrange=bin_range,      # Đã sửa: Ép giới hạn khung cột
+                            bins=20,                 
+                            binrange=bin_range,      
                             kde=False,               
                             stat="count",            
                             alpha=0.25,
@@ -144,32 +155,26 @@ if uploaded_file is not None:
                             ax=ax
                         )
                         
-                        # 2. Tính toán tham số Thống kê có trọng số
+                        # Tính toán và vẽ Normal Curve
                         weighted_mean = np.average(values, weights=weights)
                         weighted_var = np.average((values - weighted_mean)**2, weights=weights)
                         weighted_std = np.sqrt(weighted_var)
                         
-                        # 3. Vẽ đường Phân phối chuẩn toán học (Normal Curve)
                         if weighted_std > 0:
-                            # Khởi tạo dải X để vẽ đường cong
                             x_axis = np.linspace(min_val, max_val, 150)
                             pdf = stats.norm.pdf(x_axis, weighted_mean, weighted_std)
-                            # Đổi hệ số PDF sang quy mô đếm số lượng cột
                             scaled_pdf = pdf * total_weight * bin_width
-                            # Vẽ đường mượt mà
                             ax.plot(x_axis, scaled_pdf, color=color, linewidth=2, alpha=0.9)
                             
-                        # 4. Vẽ đường nét đứt Trung bình
+                        # Vẽ đường nét đứt Trung bình
                         ax.axvline(weighted_mean, color=color, linestyle='--', linewidth=1.5, alpha=0.9)
                 
-                # Trang trí trục và tiêu đề
                 if has_data:
                     ax.set_title(f"Độ dày: {thickness}", fontsize=12, fontweight='bold')
                     ax.set_xlabel(f"Giá trị {feature}")
                     ax.set_ylabel("Số lượng cuộn" if i == 0 else "") 
                     ax.grid(axis='y', linestyle=':', alpha=0.6)
                     
-                    # Xử lý Legend (chỉ giữ lại phần label của histogram)
                     if i == num_thick - 1:
                         handles, labels = ax.get_legend_handles_labels()
                         unique_labels = list(grade_mapping.keys())
