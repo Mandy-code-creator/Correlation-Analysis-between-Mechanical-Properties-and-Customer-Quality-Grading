@@ -168,13 +168,11 @@ if uploaded_file is not None:
     with tab4:
         st.header("4. Safe Operating Window by Thickness (with Export)")
         
-        col_opt1, col_opt2 = st.columns(2)
-        with col_opt1:
-            sigma_factor = st.radio("Select Sigma Factor", [1.0,1.5,2.0, 2.5, 3.0], index=0)
-        with col_opt2:
-            target_grade_label = st.selectbox("🎯 Target Grade to Optimize:", 
-                                              ['A+B+', 'A-B+', 'A-B', 'A-B-', 'B+'], index=1)
-            target_grade = f"{target_grade_label}數" 
+        sigma_factor = st.radio("Select Sigma Factor", [2.0, 2.5, 3.0], index=0)
+        
+        # Cố định mục tiêu tối ưu là A-B+
+        target_grade_label = 'A-B+'
+        target_grade = 'A-B+數'
 
         spec_limits = {
             "YS": (405, 500),
