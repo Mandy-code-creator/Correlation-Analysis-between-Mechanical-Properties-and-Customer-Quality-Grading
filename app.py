@@ -54,16 +54,12 @@ if uploaded_file is not None:
         summary_df['Total Coils'] = summary_df[count_cols].sum(axis=1)
         
         for col in count_cols:
-            # Tính % và làm tròn thành số nguyên
             summary_df[f"% {col}"] = (summary_df[col] / summary_df['Total Coils'] * 100).fillna(0).round(0).astype(int)
             
         display_df = summary_df.copy()
         display_df.rename(columns={'厚度歸類': 'Thickness'}, inplace=True)
         
-        # Thêm cột STT bắt đầu từ 1
         display_df.insert(0, 'STT', range(1, len(display_df) + 1))
-        
-        # Dùng hide_index=True để ẩn cột index mặc định của dataframe
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
     # --- TAB 2: CORRELATION ---
@@ -72,7 +68,6 @@ if uploaded_file is not None:
         df['Quality_Score'] = (5*df.get('A+B+數', 0) + 4*df.get('A-B+數', 0) + 3*df.get('A-B數', 0) +
                                2*df.get('A-B-數', 0) + 1*df.get('B+數', 0)) / df['Total_Count']
         corr_matrix = df[['Quality_Score'] + mech_features].corr()[['Quality_Score']].drop('Quality_Score')
-        # Hệ số tương quan vẫn giữ số thập phân vì nằm trong khoảng -1 đến 1
         st.dataframe(corr_matrix.style.background_gradient(cmap='coolwarm'), use_container_width=True)
 
     # --- TAB 3: DISTRIBUTION (PARALLEL VIEW) ---
@@ -178,7 +173,7 @@ if uploaded_file is not None:
                 if len(vals) == 0:
                     continue
 
-                # Loại bỏ ngoại lai (±3σ)
+                # loại bỏ ngoại lai (±3σ)
                 mean_val = np.mean(vals)
                 std_val = np.std(vals, ddof=1)
                 vals_clean = vals[(vals >= mean_val-3*std_val) & (vals <= mean_val+3*std_val)]
@@ -203,24 +198,21 @@ if uploaded_file is not None:
                 LCL_I = mean_val - sigma_factor*std_val
                 ctrl_imr = f"{round(LCL_I,2)}–{round(UCL_I,2)}"
 
-                # Success Probability in Control Zone
+                # CHỈNH SỬA LỖI N/A: Tính Xác Suất Trực Tiếp Trên Dữ Liệu
                 target_grade = 'A-B+數'
                 temp_opt = df_t[[feat, target_grade, 'Total_Count']].dropna()
                 success_prob = None
+                
                 if len(temp_opt) > 0:
-                    temp_opt['bin'] = pd.qcut(temp_opt[feat], q=12, duplicates='drop')
-                    bin_res = temp_opt.groupby('bin', observed=True).agg({
-                        target_grade: 'sum',
-                        'Total_Count': 'sum'
-                    })
-                    bin_res['Success_Rate'] = (bin_res[target_grade] / bin_res['Total_Count'] * 100).round(2)
+                    # Trích xuất tất cả các cuộn thép có cơ tính rơi vào vùng I-MR an toàn
+                    coils_in_zone = temp_opt[(temp_opt[feat] >= LCL_I) & (temp_opt[feat] <= UCL_I)]
                     
-                    # FIX TYPE ERROR HERE: astype(float)
-                    bin_res['Mid'] = bin_res.index.map(lambda x: x.mid).astype(float)
-                    
-                    bins_in_ctrl = bin_res[(bin_res['Mid'] >= LCL_I) & (bin_res['Mid'] <= UCL_I)]
-                    if not bins_in_ctrl.empty:
-                        success_prob = bins_in_ctrl['Success_Rate'].mean()
+                    if len(coils_in_zone) > 0:
+                        total_target_yield = coils_in_zone[target_grade].sum()
+                        total_all_yield = coils_in_zone['Total_Count'].sum()
+                        
+                        if total_all_yield > 0:
+                            success_prob = (total_target_yield / total_all_yield) * 100
 
                 # Segment Distribution
                 seg_A_Bplusplus = df_t['A+B+數'].sum()
@@ -243,7 +235,6 @@ if uploaded_file is not None:
 
                 # Expected Quality Level
                 if success_prob is not None:
-                    # FIX ZERO DIVISION RISK HERE: added seg_total > 0
                     if success_prob >= 70 and seg_total > 0 and (seg_A_Bplusplus+seg_A_Bplus)/seg_total >= 0.75:
                         exp_quality = "A-B+"
                     elif success_prob >= 40:
@@ -266,7 +257,7 @@ if uploaded_file is not None:
                     "Spec Limit": f"{low}–{high}" if high else f">={low}",
                     "Proposed Control Limit": ctrl_limit,
                     "I-MR Control Limit": ctrl_imr,
-                    "Success Probability in Control Zone (%)": round(success_prob,2) if success_prob else "N/A",
+                    "Success Probability in Control Zone (%)": round(success_prob, 2) if success_prob is not None else "N/A",
                     "Segment Distribution (A+B+, A-B+, A-B, A-B-, B+)": seg_dist,
                     "Expected Quality Level": exp_quality,
                     "Status": status
@@ -274,3 +265,68 @@ if uploaded_file is not None:
 
             status_df = pd.DataFrame(status_list)
             st.dataframe(status_df, use_container_width=True)
+
+            # --- I-MR Chart ---
+            for feat in mech_features:
+                vals = df_t[feat].dropna().values
+                if len(vals) > 1:
+                    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 6))
+                    mean_val = np.mean(vals)
+                    std_val = np.std(vals, ddof=1)
+                    UCL_I = mean_val + sigma_factor*std_val
+                    LCL_I = mean_val - sigma_factor*std_val
+
+                    ax1.plot(vals, marker='o', color='blue')
+                    ax1.axhline(mean_val, color='green', linestyle='--', label='Mean')
+                    ax1.axhline(UCL_I, color='red', linestyle='--', label=f'UCL I ({sigma_factor}σ)')
+                    ax1.axhline(LCL_I, color='red', linestyle='--', label=f'LCL I ({sigma_factor}σ)')
+                    ax1.set_title(f"Individuals Chart for {feat}")
+                    ax1.legend()
+
+                    MR = np.abs(np.diff(vals))
+                    MR_mean = np.mean(MR)
+                    d3, d4 = 0, 3.267 
+                    UCL_MR = d4 * MR_mean
+                    LCL_MR = d3 * MR_mean
+                    ax2.plot(MR, marker='o', color='orange')
+                    ax2.axhline(MR_mean, color='green', linestyle='--', label='MR Mean')
+                    ax2.axhline(UCL_MR, color='red', linestyle='--', label='UCL MR')
+                    ax2.axhline(LCL_MR, color='red', linestyle='--', label='LCL MR')
+                    ax2.set_title(f"Moving Range Chart for {feat}")
+                    ax2.legend()
+                    st.pyplot(fig)
+
+            # --- Success Probability Curves ---
+            pairs = [("YS","TS"), ("EL","YPE")]
+            target_grade = 'A-B+數'
+            for f1, f2 in pairs:
+                if f1 in df_t.columns and f2 in df_t.columns:
+                    st.markdown(f"### Success Probability Curves: {f1} & {f2}")
+                    fig, axes = plt.subplots(1, 2, figsize=(18, 5))
+                    for ax, feat in zip(axes, [f1, f2]):
+                        temp_opt = df_t[[feat, target_grade, 'Total_Count']].dropna()
+                        if len(temp_opt) > 0:
+                            temp_opt['bin'] = pd.qcut(temp_opt[feat], q=12, duplicates='drop')
+                            bin_res = temp_opt.groupby('bin', observed=True).agg({
+                                target_grade: 'sum',
+                                'Total_Count': 'sum'
+                            })
+                            bin_res['Success_Rate'] = (bin_res[target_grade] / bin_res['Total_Count'] * 100).round(2)
+                            bin_res['Label'] = bin_res.index.map(lambda x: f"{x.left:.0f}-{x.right:.0f}")
+                            x_positions = np.arange(len(bin_res))
+                            
+                            ax.bar(x_positions, bin_res['Total_Count'], color='lightgray', alpha=0.5, label="Volume")
+                            ax2 = ax.twinx()
+                            ax2.plot(x_positions, bin_res['Success_Rate'], marker='o', color='green', lw=2, label="Success %")
+                            
+                            ax.set_xticks(x_positions)
+                            ax.set_xticklabels(bin_res['Label'], rotation=45, ha='right')
+                            ax.set_xlabel(feat)
+                            ax.set_ylabel("Volume", color='gray')
+                            ax2.set_ylabel("Success %", color='green')
+                            ax2.set_ylim(0, 105)
+                    st.pyplot(fig)
+                    st.markdown("---")
+
+else:
+    st.info("Please upload an Excel file to start analysis.")
