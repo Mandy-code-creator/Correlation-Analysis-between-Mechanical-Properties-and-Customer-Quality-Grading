@@ -48,26 +48,44 @@ if uploaded_file is not None:
             
         with col2:
             st.subheader("Biểu đồ tỉ lệ phần trăm")
-            fig1, ax1 = plt.subplots(figsize=(8, 4))
             
-            # XỬ LÝ LỖI FONT & VẼ BIỂU ĐỒ
-            # 1. Tạo dataframe tỷ lệ và đổi tên cột để tránh lỗi tiếng Trung
-            plot_df = summary_df.set_index('厚度歸類')[count_cols].apply(lambda x: x*100/sum(x), axis=1)
+            # 1. Lấy dữ liệu và đổi tên cột cho đẹp
+            plot_df = summary_df.set_index('厚度歸類')[count_cols]
             plot_df.columns = ['A+B+', 'A-B+', 'A-B', 'A-B-', 'B+']
             
-            # 2. Vẽ biểu đồ Stacked Bar
-            plot_df.plot(kind='bar', stacked=True, ax=ax1, colormap='RdYlGn_r', edgecolor='white', linewidth=0.5)
-            ax1.set_ylabel("Tỉ lệ (%)")
-            ax1.set_xlabel("Độ dày") # Đổi tên trục X để sửa lỗi font
+            # Đồng bộ màu sắc với Tab 3
+            pie_colors = ['#2ca02c', '#1f77b4', '#ff7f0e', '#9467bd', '#d62728']
             
-            # 3. THÊM SỐ PHẦN TRĂM VÀO GIỮA CỘT
-            for container in ax1.containers:
-                # Điều kiện: Chỉ in số nếu chiều cao (tỉ lệ %) > 3% để tránh đè chữ
-                labels = [f"{v.get_height():.1f}%" if v.get_height() > 3 else "" for v in container]
-                ax1.bar_label(container, labels=labels, label_type='center', fontsize=9, fontweight='bold', color='#333333')
+            # 2. Khởi tạo chuỗi biểu đồ tròn
+            thicknesses = plot_df.index
+            n_pies = len(thicknesses)
             
-            # Cấu hình lại chú thích (Legend)
-            plt.legend(title="Cấp độ", bbox_to_anchor=(1.05, 1), loc='upper left')
+            # Tạo khung vẽ tùy theo số lượng độ dày (mỗi pie chart rộng 3.5 inch)
+            fig1, axes1 = plt.subplots(1, n_pies, figsize=(3.5 * n_pies, 3.5))
+            
+            # Xử lý trường hợp chỉ có 1 độ dày
+            if n_pies == 1:
+                axes1 = [axes1]
+                
+            # 3. Vẽ từng biểu đồ tròn
+            for ax, thick in zip(axes1, thicknesses):
+                data = plot_df.loc[thick]
+                
+                # Chỉ lấy những cấp độ có số lượng > 0 để vẽ (tránh lỗi)
+                mask = data > 0
+                if mask.any():
+                    ax.pie(
+                        data[mask], 
+                        autopct=lambda p: f'{p:.1f}%' if p > 3 else '', # Chỉ hiện số nếu > 3%
+                        startangle=90, # Bắt đầu xoay từ góc 12h
+                        colors=[c for c, m in zip(pie_colors, mask) if m],
+                        wedgeprops={'edgecolor': 'white', 'linewidth': 1.5} # Viền trắng tách các khối
+                    )
+                ax.set_title(f"Độ dày: {thick}", fontsize=12, fontweight='bold')
+                
+            # Đặt chú thích (Legend) chung ở bên phải ngoài cùng
+            fig1.legend(plot_df.columns, title="Cấp độ chất lượng", bbox_to_anchor=(1.05, 0.5), loc="center left")
+            plt.tight_layout()
             st.pyplot(fig1)
 
     # --- TAB 2: MA TRẬN TƯƠNG QUAN ---
