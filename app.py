@@ -63,7 +63,7 @@ if uploaded_file is not None:
         display_df = summary_df.copy()
         display_df.rename(columns={'厚度歸類': 'Thickness'}, inplace=True)
         display_df.insert(0, 'No.', range(1, len(display_df) + 1))
-        int_cols = [c for c in (count_cols + ['Total Coils', 'No.']) if c in display_df.columns]
+        int_cols = [c for c in (count_cols + ['Total Data', 'No.']) if c in display_df.columns]
         for c in int_cols:
             display_df[c] = display_df[c].astype(int)
         st.dataframe(display_df, use_container_width=True, hide_index=True)
