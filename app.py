@@ -131,7 +131,7 @@ if uploaded_file is not None:
 
     # --- TAB 3: OPTIMIZATION (Mill Range & Release Range) ---
     with tab3:
-        st.header("3. Production Control Limits & Goals")
+        st.header("3. Production Control Limits & Goals (A-B & Above Focused)")
         sigma_factor = st.radio("Select Sigma Factor for Safety Zone", [2.0, 2.5, 3.0], index=0)
 
         spec_limits = {
@@ -140,39 +140,66 @@ if uploaded_file is not None:
 
         thickness_list = sorted(df['厚度歸類'].dropna().unique(), key=str)
         all_export_data = []
+        
+        # Dùng để lưu dữ liệu vẽ biểu đồ I-MR sau khi lọc cấp độ A-B trở lên
+        plot_data_dict = {}
 
         for thick in thickness_list:
             st.subheader(f"Thickness Category: {thick}")
             df_t = df[df['厚度歸類'] == thick]
-
+            plot_data_dict[thick] = {}
             status_list = []
+            
+            # Khai báo các cấp độ chất lượng tốt (A-B và trở lên)
+            good_grades = [c for c in ['A+B+數', 'A-B+數', 'A-B數'] if c in df_t.columns]
+
             for feat in mech_features:
-                vals = df_t[feat].dropna().values
-                if len(vals) == 0: continue
+                temp_calc = df_t[[feat] + good_grades].dropna(subset=[feat])
+                if len(temp_calc) == 0: continue
 
-                mean_val = np.mean(vals)
-                std_val = np.std(vals, ddof=1)
-                vals_clean = vals[(vals >= mean_val-3*std_val) & (vals <= mean_val+3*std_val)]
+                # Chỉ tính toán dựa trên các cuộn có chứa hàng từ A-B trở lên
+                temp_calc['Good_Count'] = temp_calc[good_grades].sum(axis=1)
+                temp_calc_good = temp_calc[temp_calc['Good_Count'] > 0]
 
-                mean_val = np.mean(vals_clean)
-                std_val = np.std(vals_clean, ddof=1)
-                
-                # I-MR Limits
+                if not temp_calc_good.empty:
+                    vals_good = temp_calc_good[feat].values
+                    wgts_good = temp_calc_good['Good_Count'].values
+                    
+                    # Tính Mean và Std Trọng số ban đầu
+                    mean_val = np.average(vals_good, weights=wgts_good)
+                    std_val = np.sqrt(np.average((vals_good - mean_val)**2, weights=wgts_good))
+                    
+                    # Lọc nhiễu (Outliers 3-sigma) của riêng tập dữ liệu TỐT này
+                    mask = (vals_good >= mean_val - 3*std_val) & (vals_good <= mean_val + 3*std_val)
+                    if mask.sum() > 0:
+                        vals_good = vals_good[mask]
+                        wgts_good = wgts_good[mask]
+                        mean_val = np.average(vals_good, weights=wgts_good)
+                        std_val = np.sqrt(np.average((vals_good - mean_val)**2, weights=wgts_good))
+                    
+                    # Lưu lại vals_good để vẽ biểu đồ
+                    plot_data_dict[thick][feat] = vals_good
+                else:
+                    # Dự phòng nếu toàn bộ lô hàng là hàng kém (rất hiếm khi xảy ra)
+                    vals = temp_calc[feat].values
+                    mean_val = np.mean(vals)
+                    std_val = np.std(vals, ddof=1)
+                    plot_data_dict[thick][feat] = vals
+
+                # --- I-MR Limits (Đã được lọc Tinh Hoa) ---
                 UCL_I = mean_val + sigma_factor*std_val
                 LCL_I = mean_val - sigma_factor*std_val
                 
                 low, high = spec_limits.get(feat, (None, None))
 
-                # --- NEW LOGIC: TIGHTENED RELEASE RANGE ---
+                # --- CALCULATE INTERNAL RELEASE RANGE & MILL RANGE ---
                 prac_low, prac_high = None, None
                 
                 if low is not None and high is not None:
-                    # Bóp hẹp Spec ban đầu 5% để tạo Internal Release Range
                     theo_low = low + 0.05*(high-low)
                     theo_high = high - 0.05*(high-low)
                     release_range = f"{int(round(theo_low))}–{int(round(theo_high))}"
                     
-                    # Mill Range logic: Intersection of New Release Range and Capability
                     prac_low = max(theo_low, LCL_I)
                     prac_high = min(theo_high, UCL_I)
                     
@@ -180,7 +207,6 @@ if uploaded_file is not None:
                     mill_range = f"{int(round(prac_low))}–{int(round(prac_high))}"
                     
                 elif low is not None:
-                    # Bóp hẹp Spec dưới (chỉ có giới hạn dưới)
                     theo_low = low + 0.05*low
                     release_range = f">={int(round(theo_low))}"
                     
@@ -190,12 +216,10 @@ if uploaded_file is not None:
                     release_range = "N/A"
                     mill_range = "N/A"
 
-                # --- TARGET GOAL LOGIC (BASED ONLY ON A-B+ & A-B) ---
-                temp_target = df_t[[feat, 'A-B+數', 'A-B數']].dropna(subset=[feat])
-                weights = temp_target['A-B+數'] + temp_target['A-B數']
-                
-                if weights.sum() > 0:
-                    target_goal = int(round(np.average(temp_target[feat], weights=weights)))
+                # --- TARGET GOAL ---
+                # Vì mean_val giờ đây đã là trung bình của riêng nhóm A-B trở lên, Target chính là mean_val
+                if not temp_calc_good.empty:
+                    target_goal = int(round(mean_val))
                 else:
                     if prac_low is not None and prac_high is not None:
                         target_goal = int(round((prac_low + prac_high) / 2))
@@ -226,7 +250,7 @@ if uploaded_file is not None:
                 row_data = {
                     "Thickness": thick,
                     "Feature": feat,
-                    "Internal Release Range": release_range, # Đổi tên cho Sếp dễ hiểu
+                    "Internal Release Range": release_range, 
                     "Segment Distribution": seg_dist,
                     "Target Goal": target_goal,
                     "Mill Range (Proposed)": mill_range,
@@ -242,29 +266,33 @@ if uploaded_file is not None:
                 display_df_3 = display_df_3.drop(columns=['Thickness'])
             st.dataframe(display_df_3, use_container_width=True, hide_index=True)
 
-            # --- I-MR Charts with Tight Layout ---
+            # --- I-MR Charts ---
             for feat in mech_features:
-                v = df_t[feat].dropna().values
-                if len(v) > 1:
-                    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 7))
-                    m_v, s_v = np.mean(v), np.std(v, ddof=1)
-                    U, L = m_v + sigma_factor*s_v, m_v - sigma_factor*s_v
-                    
-                    ax1.plot(v, marker='o', color='blue', markersize=4)
-                    ax1.axhline(m_v, color='green', ls='--', label=f'Mean: {int(round(m_v))}')
-                    ax1.axhline(U, color='red', ls='--', label=f'UCL: {int(round(U))}')
-                    ax1.axhline(L, color='red', ls='--', label=f'LCL: {int(round(L))}')
-                    ax1.set_title(f"Individuals Chart: {feat}")
-                    ax1.legend(loc='upper right', fontsize=8)
-                    
-                    MR = np.abs(np.diff(v))
-                    ax2.plot(MR, marker='o', color='orange', markersize=4)
-                    ax2.axhline(np.mean(MR), color='green', ls='--', label=f'MR Mean: {int(round(np.mean(MR)))}')
-                    ax2.set_title("Moving Range Chart")
-                    ax2.legend(loc='upper right', fontsize=8)
-                    
-                    fig.tight_layout(pad=3.0)
-                    st.pyplot(fig)
+                if feat in plot_data_dict[thick]:
+                    v = plot_data_dict[thick][feat] # Chỉ lấy dữ liệu TỐT để vẽ
+                    if len(v) > 1:
+                        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 7))
+                        
+                        # Sử dụng thống kê thực tế từ mảng đã lọc
+                        m_v = np.mean(v)
+                        s_v = np.std(v, ddof=1)
+                        U, L = m_v + sigma_factor*s_v, m_v - sigma_factor*s_v
+                        
+                        ax1.plot(v, marker='o', color='blue', markersize=4)
+                        ax1.axhline(m_v, color='green', ls='--', label=f'Mean: {int(round(m_v))}')
+                        ax1.axhline(U, color='red', ls='--', label=f'UCL: {int(round(U))}')
+                        ax1.axhline(L, color='red', ls='--', label=f'LCL: {int(round(L))}')
+                        ax1.set_title(f"Individuals Chart (A-B & Above Only): {feat}")
+                        ax1.legend(loc='upper right', fontsize=8)
+                        
+                        MR = np.abs(np.diff(v))
+                        ax2.plot(MR, marker='o', color='orange', markersize=4)
+                        ax2.axhline(np.mean(MR), color='green', ls='--', label=f'MR Mean: {int(round(np.mean(MR)))}')
+                        ax2.set_title("Moving Range Chart")
+                        ax2.legend(loc='upper right', fontsize=8)
+                        
+                        fig.tight_layout(pad=3.0)
+                        st.pyplot(fig)
             st.markdown("---")
 
         # --- EXPORT FINAL ---
