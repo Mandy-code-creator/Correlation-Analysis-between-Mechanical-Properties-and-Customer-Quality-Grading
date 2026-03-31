@@ -22,21 +22,20 @@ if uploaded_file is not None:
     df = pd.read_excel(uploaded_file)
     df.columns = df.columns.str.strip() 
 
-    # --- 2. DATA PREPROCESSING (UPDATED GRADES) ---
-    # Cấu hình lại các cột cấp độ theo thực tế của bạn
-    count_cols = ['A-B+', 'A-B-', 'B+', 'B']
+    # --- 2. DATA PREPROCESSING (LẤY ĐÚNG CÁC CỘT CÓ CHỮ 數) ---
+    # Đây là các cột chứa con số thực tế trong file Excel của bạn
+    count_cols = ['A-B+數', 'A-B數', 'A-B-數', 'B+數', 'B數']
+    
+    # Kiểm tra và chỉ lấy những cột thực sự tồn tại
     count_cols = [col for col in count_cols if col in df.columns]
+    
     for col in count_cols:
+        # Ép kiểu về số, nếu ô trống thì coi như bằng 0
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
+    # Các cột đặc tính cơ lý để phân tích (lấy từ các cột YS, TS, EL... tương ứng)
     mech_features = ['YS', 'TS', 'EL', 'YPE', 'HARDNESS']
     mech_features = [feat for feat in mech_features if feat in df.columns]
-    for feat in mech_features:
-        df[feat] = pd.to_numeric(df[feat], errors='coerce')
-        df.loc[df[feat] <= 0, feat] = np.nan
-
-    df['Total_Count'] = df[count_cols].sum(axis=1)
-    df = df[df['Total_Count'] > 0].copy()
 
     # --- 3. CREATE TABS ---
     tab1, tab2, tab3 = st.tabs([
