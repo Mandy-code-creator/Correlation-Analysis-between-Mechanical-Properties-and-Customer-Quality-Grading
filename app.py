@@ -92,13 +92,18 @@ if uploaded_file is not None:
                     ax.axvline(m_d, color=color, ls='--', lw=2)
                     mean_inf.append({'val': m_d, 'color': color})
 
+            # --- SỬA LỖI GHI ĐÈ NHÃN CHUYÊN SÂU ---
             if mean_inf:
                 mean_inf.sort(key=lambda x: x['val'])
                 y_max_l = ax.get_ylim()[1]
                 for idx_m, info_m in enumerate(mean_inf):
-                    y_p = (0.94 if idx_m % 2 == 0 else 0.86) * y_max_l
+                    # Trải đều độ cao theo 4 cấp bậc (95%, 87%, 79%, 71%) thay vì chỉ 2 cấp
+                    y_p = y_max_l * (0.95 - (idx_m % 4) * 0.08)
+                    
+                    # Thêm boxstyle để đóng khung con số rõ ràng
                     ax.text(info_m['val'], y_p, f"{info_m['val']:.0f}", color=info_m['color'], 
-                            fontsize=10, fontweight='bold', ha='center', bbox=dict(facecolor='white', alpha=0.7, edgecolor='none'))
+                            fontsize=10, fontweight='bold', ha='center', va='center',
+                            bbox=dict(facecolor='white', alpha=0.85, edgecolor=info_m['color'], lw=1.5, boxstyle='round,pad=0.3'))
 
             ax.set_title(f"{feat} (Thick: {thick})", fontsize=14, fontweight='bold')
             ax.set_ylabel("Count")
