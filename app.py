@@ -160,7 +160,7 @@ if uploaded_file is not None:
                 low, high = spec_limits.get(feat, (None, None))
                 spec_str = f"{int(low)}–{int(high)}" if low and high else (f">={int(low)}" if low else "N/A")
 
-# --- CALCULATE DATA-DRIVEN LIMITS ---
+            # --- CALCULATE DATA-DRIVEN LIMITS ---
                 if not temp_calc_good.empty:
                     vals_good = temp_calc_good[feat].values
                     wgts_good = temp_calc_good['Good_Count'].values
