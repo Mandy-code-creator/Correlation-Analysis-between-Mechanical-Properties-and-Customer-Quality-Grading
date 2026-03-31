@@ -59,7 +59,6 @@ if uploaded_file is not None:
         display_df.rename(columns={'厚度歸類': 'Thickness'}, inplace=True)
         display_df.insert(0, 'STT', range(1, len(display_df) + 1))
         
-        # Chuyển các cột đếm về số nguyên
         cols_to_int = count_cols + ['Total Coils']
         for c in cols_to_int:
             if c in display_df.columns:
@@ -97,13 +96,18 @@ if uploaded_file is not None:
                     ax.axvline(m_d, color=color, ls='--', lw=2)
                     mean_inf.append({'val': m_d, 'color': color})
 
+            # --- SỬA LỖI GHI ĐÈ NHÃN CHUYÊN SÂU ---
             if mean_inf:
                 mean_inf.sort(key=lambda x: x['val'])
                 y_max_l = ax.get_ylim()[1]
                 for idx_m, info_m in enumerate(mean_inf):
-                    y_p = (0.94 if idx_m % 2 == 0 else 0.86) * y_max_l
+                    # Trải đều độ cao theo 4 cấp bậc (95%, 87%, 79%, 71%) thay vì chỉ 2 cấp
+                    y_p = y_max_l * (0.95 - (idx_m % 4) * 0.08)
+                    
+                    # Thêm boxstyle để đóng khung con số rõ ràng
                     ax.text(info_m['val'], y_p, f"{info_m['val']:.0f}", color=info_m['color'], 
-                            fontsize=10, fontweight='bold', ha='center', bbox=dict(facecolor='white', alpha=0.7, edgecolor='none'))
+                            fontsize=10, fontweight='bold', ha='center', va='center',
+                            bbox=dict(facecolor='white', alpha=0.85, edgecolor=info_m['color'], lw=1.5, boxstyle='round,pad=0.3'))
 
             ax.set_title(f"{feat} (Thick: {thick})", fontsize=14, fontweight='bold')
             ax.set_ylabel("Count")
@@ -167,7 +171,6 @@ if uploaded_file is not None:
                 vals = df_t[feat].dropna().values
                 if len(vals) == 0: continue
 
-                # Loại bỏ ngoại lai 3σ
                 mean_val = np.mean(vals)
                 std_val = np.std(vals, ddof=1)
                 vals_clean = vals[(vals >= mean_val-3*std_val) & (vals <= mean_val+3*std_val)]
@@ -177,7 +180,6 @@ if uploaded_file is not None:
                 safe_val = mean_val - sigma_factor*std_val
                 low, high = spec_limits.get(feat, (None, None))
 
-                # Chốt giới hạn số nguyên
                 if low is not None and high is not None:
                     spec_str = f"{int(low)}–{int(high)}"
                     ctrl_low = int(round(low + 0.05*(high-low)))
@@ -213,14 +215,37 @@ if uploaded_file is not None:
                 else:
                     seg_dist = "N/A"
 
-                # Logic đánh giá Risk
+                target_grade = 'A-B+數'
+                temp_opt = df_t[[feat, target_grade, 'Total_Count']].dropna()
+                success_prob = None
+                if len(temp_opt) > 0:
+                    temp_opt['bin'] = pd.qcut(temp_opt[feat], q=12, duplicates='drop')
+                    bin_res = temp_opt.groupby('bin', observed=True).agg({
+                        target_grade: 'sum',
+                        'Total_Count': 'sum'
+                    })
+                    bin_res['Success_Rate'] = (bin_res[target_grade] / bin_res['Total_Count'] * 100).fillna(0).round(0).astype(int)
+                    bin_res['Mid'] = bin_res.index.map(lambda x: x.mid).astype(float)
+                    bins_in_ctrl = bin_res[(bin_res['Mid'] >= LCL_I) & (bin_res['Mid'] <= UCL_I)]
+                    if not bins_in_ctrl.empty:
+                        success_prob = bins_in_ctrl['Success_Rate'].mean()
+
+                if success_prob is not None:
+                    if success_prob >= 70 and seg_total > 0 and (seg_A_Bplusplus+seg_A_Bplus)/seg_total >= 0.75:
+                        exp_quality = "A-B+"
+                    elif success_prob >= 40:
+                        exp_quality = "A-B"
+                    else:
+                        exp_quality = "B or lower"
+                else:
+                    exp_quality = "Unknown"
+
                 status = "✅ Safe"
                 if low is not None and safe_val < low:
                     status = "⚠ Risk (below limit)"
                 if high is not None and safe_val > high:
                     status = "⚠ Risk (above limit)"
 
-                # Cấu hình dữ liệu hiển thị (ĐÃ XÓA CỘT XÁC SUẤT)
                 row_data = {
                     "Thickness": thick,
                     "Feature": feat,
@@ -230,6 +255,7 @@ if uploaded_file is not None:
                     "Proposed Control Limit": ctrl_limit,
                     "I-MR Control Limit": ctrl_imr,
                     "Segment Distribution": seg_dist,
+                    "Expected Quality Level": exp_quality,
                     "Status": status
                 }
                 
