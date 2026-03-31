@@ -137,27 +137,76 @@ if uploaded_file is not None:
                         st.pyplot(fig)
                         fig.savefig(f"dist_{feat}_{thick}.png", bbox_inches='tight')
 
-    # --- TAB 3: OPTIMIZATION ---
+# --- TAB 3: OPTIMIZATION (GỘP A-B TRỞ LÊN & THÊM GIỚI HẠN TỔNG THỂ) ---
     with tab3:
         st.header("3. Production Control Limits & Goals (A-B & Above Focused)")
-        sigma_choice = st.radio("Select Sigma Factor", [2.0, 2.5, 3.0], index=0)
+        
+        # 1. Cấu hình chung
+        sigma_choice = st.radio("Select Sigma Factor for Mill Safety Zone", [2.0, 2.5, 3.0], index=0)
         spec_limits = {"YS": (405, 500), "TS": (415, 550), "EL": (25, None), "YPE": (4, None)}
+        good_cols = [c for c in ['A-B+數', 'A-B數'] if c in df.columns]
+
+        # ---------------------------------------------------------
+        # PHẦN MỚI: TÍNH TOÁN GIỚI HẠN KIỂM SOÁT TỔNG THỂ (OVERALL)
+        # ---------------------------------------------------------
+        st.subheader("🌐 Overall Factory Control Limits (0.5 ~ 0.8 Combined)")
+        st.info("Bảng này tính toán mục tiêu dựa trên toàn bộ dữ liệu hàng đạt (A-B trở lên) của nhà máy.")
+        
+        overall_status = []
+        for feat in mech_features:
+            if good_cols:
+                # Lọc dữ liệu hàng tốt trên toàn bộ dataframe
+                df_overall = df[[feat] + good_cols].dropna(subset=[feat])
+                df_overall['Good_Qty'] = df_overall[good_cols].sum(axis=1)
+                df_overall = df_overall[df_overall['Good_Qty'] > 0]
+                
+                if not df_overall.empty:
+                    v_o, w_o = df_overall[feat].values, df_overall['Good_Qty'].values
+                    # Lọc nhiễu IQR tổng thể
+                    q1_o, q3_o = np.percentile(v_o, 25), np.percentile(v_o, 75)
+                    iqr_o = q3_o - q1_o
+                    mask_o = (v_o >= q1_o - 1.5*iqr_o) & (v_o <= q3_o + 1.5*iqr_o)
+                    vf_o, wf_o = v_o[mask_o], w_o[mask_o]
+                    
+                    m_ov = np.average(vf_o, weights=wf_o)
+                    s_ov = np.sqrt(np.average((vf_o - m_ov)**2, weights=wf_o))
+                    
+                    low, high = spec_limits.get(feat, (None, None))
+                    spec_s = f"{int(low)}–{int(high)}" if low and high else (f">={int(low)}" if low else "N/A")
+                    
+                    overall_status.append({
+                        "Feature": feat,
+                        "Standard Limit": spec_s,
+                        "Overall Target": int(round(m_ov)),
+                        f"Overall Tol (±{sigma_choice}σ)": int(round(sigma_choice * s_ov)),
+                        "Overall Mill Range": f"{int(round(m_ov - sigma_choice*s_ov))}–{int(round(m_ov + sigma_choice*s_ov))}"
+                    })
+
+        if overall_status:
+            st.dataframe(pd.DataFrame(overall_status), use_container_width=True, hide_index=True)
+
+        st.markdown("---")
+
+        # ---------------------------------------------------------
+        # PHẦN CHI TIẾT: GIỚI HẠN THEO TỪNG ĐỘ DÀY (GIỮ NGUYÊN NHƯ CŨ)
+        # ---------------------------------------------------------
+        st.subheader("🔍 Detailed Limits per Thickness Category")
+        thickness_list = sorted(df['厚度歸類'].dropna().unique(), key=lambda x: float(x))
         all_export_data = []
         plot_data_dict = {}
 
         for thick in thickness_list:
-            st.subheader(f"Thickness Category: {thick}")
+            st.markdown(f"#### 📏 Thickness Category: **{thick}**")
             df_t = df[df['厚度歸類'] == thick]
             plot_data_dict[thick] = {}
-            status_list = []
-            good_cols = [c for c in ['A-B+數', 'A-B數'] if c in df_t.columns]
-
+            thick_status = []
+            
             for feat in mech_features:
                 temp_calc = df_t[[feat] + good_cols].dropna(subset=[feat]) if good_cols else pd.DataFrame()
                 if not temp_calc.empty:
                     temp_calc['Good_Qty'] = temp_calc[good_cols].sum(axis=1)
                     temp_calc = temp_calc[temp_calc['Good_Qty'] > 0]
-                
+
                 low, high = spec_limits.get(feat, (None, None))
                 spec_str = f"{int(low)}–{int(high)}" if low and high else (f">={int(low)}" if low else "N/A")
 
@@ -167,49 +216,42 @@ if uploaded_file is not None:
                     iqr = q3 - q1
                     mask = (v_f >= q1 - 1.5*iqr) & (v_f <= q3 + 1.5*iqr)
                     vf, wf = v_f[mask] if mask.sum() > 0 else v_f, w_f[mask] if mask.sum() > 0 else w_f
+                    
                     m_v = np.average(vf, weights=wf)
                     s_v = np.sqrt(np.average((vf - m_v)**2, weights=wf))
                     plot_data_dict[thick][feat] = {'values': vf, 'mean': m_v, 'std': s_v}
                     
-                    target = int(round(m_v))
-                    rel_range = f"{int(round(m_v - 3*s_v))}–{int(round(m_v + 3*s_v))}"
-                    mill_range = f"{int(round(m_v - sigma_choice*s_v))}–{int(round(m_v + sigma_choice*s_v))}"
-                    tol = int(round(sigma_choice * s_v))
-                else:
-                    target, rel_range, mill_range, tol, m_v, s_v = "N/A", "N/A", "N/A", "N/A", 0, 0
+                    row = {
+                        "Feature": feat, "Current Limit": spec_str,
+                        "Target Goal": int(round(m_v)),
+                        f"Tol (±{sigma_choice}σ)": int(round(sigma_choice * s_v)),
+                        "Proposed Mill Range": f"{int(round(m_v - sigma_choice*s_v))}–{int(round(m_v + sigma_choice*s_v))}"
+                    }
+                    thick_status.append(row)
+                    exp_row = row.copy(); exp_row['Thickness'] = thick; all_export_data.append(exp_row)
 
-                total_n = df_t[count_cols].sum().sum()
-                seg_dist = ", ".join([f"{k.replace('數','')}:{int(round(df_t[k].sum()/total_n*100))}%" for k in count_cols]) if total_n > 0 else "N/A"
-
-                row = {"Feature": feat, "Current Control Limit": spec_str, "Segment Distribution": seg_dist,
-                       "Data-Driven Release Range": rel_range, "Target Goal": target,
-                       f"Tolerance (±{sigma_choice}σ)": tol, "Mill Range (Proposed)": mill_range}
-                status_list.append(row)
-                export_row = row.copy(); export_row['Thickness'] = thick; all_export_data.append(export_row)
-
-            st.dataframe(pd.DataFrame(status_list), use_container_width=True, hide_index=True)
-            cols_imr = st.columns(2)
+            st.dataframe(pd.DataFrame(thick_status), use_container_width=True, hide_index=True)
+            
+            # Biểu đồ I-MR cho từng độ dày
+            c_imr = st.columns(2)
             top4 = [f for f in ['YS', 'TS', 'EL', 'YPE'] if f in plot_data_dict[thick]]
             for idx, f in enumerate(top4):
-                with cols_imr[idx % 2]:
+                with c_imr[idx % 2]:
                     d = plot_data_dict[thick][f]
                     v, mv, sv = d['values'], d['mean'], d['std']
                     if len(v) > 1:
                         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 7))
                         U, L = mv + sigma_choice*sv, mv - sigma_choice*sv
                         ax1.plot(v, marker='o', color='blue', ms=3, lw=1)
-                        outs = np.where((v > U) | (v < L))[0]
-                        ax1.scatter(outs, v[outs], color='red', s=30)
                         ax1.axhline(mv, color='green', ls='--')
                         ax1.axhline(U, color='red', ls='--'); ax1.axhline(L, color='red', ls='--')
-                        ax1.set_title(f"I-Chart: {f}")
-                        mr = np.abs(np.diff(v)); mrm = np.mean(mr); mru = 3.267 * mrm
+                        ax1.set_title(f"I-Chart: {f} (Thick {thick})")
+                        
+                        mr = np.abs(np.diff(v)); mrm = np.mean(mr)
                         ax2.plot(mr, marker='o', color='orange', ms=3, lw=1)
-                        ax2.axhline(mrm, color='green', ls='--'); ax2.axhline(mru, color='red', ls='--')
-                        ax2.set_title("Moving Range Chart")
+                        ax2.axhline(mrm, color='green', ls='--')
+                        ax2.set_title("Moving Range")
                         fig.tight_layout(); st.pyplot(fig)
-                        fig.savefig(f"imr_{f}_{thick}.png", bbox_inches='tight')
-
     # --- PDF EXPORT ---
     st.markdown("### 🖨️ Export PDF Executive Report")
     def clean(t): return str(t).replace('±', '+/-').replace('–', '-').encode('latin-1', 'ignore').decode('latin-1')
