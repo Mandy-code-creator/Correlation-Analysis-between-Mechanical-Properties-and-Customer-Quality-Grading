@@ -64,17 +64,18 @@ if uploaded_file is not None:
                 
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-   # --- TAB 2: DISTRIBUTION (CÓ TRUNG BÌNH CÓ TRỌNG SỐ) ---
+   # --- TAB 2: DISTRIBUTION (BẢN CHUẨN CĂN LỀ & FIX YPE SCALE) ---
     with tab2:
         st.header("2. Mechanical Properties Distribution Analysis")
         
-        # Hàm vẽ biểu đồ chuẩn của Mandy: Có Mean Label và Histogram
         def plot_standard_dist(ax, data, feat, title_suffix, is_right_col=False):
+            # 1. Chuẩn bị dữ liệu
             N_t = data['Total_Count'].sum()
             k_b = max(int(1 + 3.322 * math.log10(N_t)) if N_t > 0 else 10, 5)
             color_map = {'A-B+數': '#2ca02c', 'A-B-數': '#ff7f0e', 'B+數': '#d62728', 'B數': '#9467bd', 'A-B數': '#1f77b4'}
             mean_inf = []
             
+            # 2. Vẽ từng Grade
             for col_n in count_cols:
                 temp_d = data[[feat, col_n]].dropna()
                 temp_d = temp_d[temp_d[col_n] > 0]
@@ -90,7 +91,7 @@ if uploaded_file is not None:
                     m_d = np.average(vals_d, weights=wgts_d)
                     s_d = np.sqrt(np.average((vals_d - m_d)**2, weights=wgts_d))
                     
-                    # Vẽ đường kẻ Mean và lưu thông tin nhãn
+                    # Vẽ đường kẻ Mean
                     ax.axvline(m_d, color=color, ls='--', lw=2)
                     mean_inf.append({'val': m_d, 'color': color})
 
@@ -100,29 +101,27 @@ if uploaded_file is not None:
                         bin_w = (vals_d.max() - vals_d.min()) / k_b if vals_d.max() != vals_d.min() else 1
                         ax.plot(x_range, stats.norm.pdf(x_range, m_d, s_d) * wgts_d.sum() * bin_w, color=color, lw=2)
 
-            # Hiển thị nhãn giá trị Mean
+            # 3. Hiển thị nhãn giá trị Mean (Căn lề thẳng hàng)
             if mean_inf:
                 mean_inf.sort(key=lambda x: x['val'])
                 y_max = ax.get_ylim()[1]
                 for i_m, info in enumerate(mean_inf):
-                    y_p = y_max * (0.9 - (i_m % 3) * 0.1) # Tránh đè nhãn
+                    y_p = y_max * (0.9 - (i_m % 3) * 0.1)
                     ax.text(info['val'], y_p, f"{info['val']:.1f}", color=info['color'], 
                             fontsize=9, fontweight='bold', ha='center',
                             bbox=dict(facecolor='white', alpha=0.8, edgecolor=info['color'], boxstyle='round,pad=0.2'))
-# --- CẬP NHẬT: ÉP CÂN THANG ĐO Y ĐỂ ĐỒNG NHẤT BỐ CỤC ---
-        # Chặn đứng việc tạo khoảng trắng blanco quá mức làm nhỏ biểu đồ YPE
 
-        # 1. Tính toán giá trị cao nhất của các cột Histogram
-        max_bar_height = data[count_cols].sum(axis=1).max()
-        
-        # 2. Thiết lập giới hạn trên của trục Y cao hơn cột cao nhất khoảng 15-20%
-        # Đây là khoảng hở vừa đủ đẹp, không bị pha loãng blanco
-        ax.set_ylim(0, max_bar_height * 1.2)
+            # 4. Tự động ép thang đo Y để biểu đồ YPE không bị nhỏ (Fix lỗi Blanco)
+            current_y_max = ax.get_ylim()[1]
+            ax.set_ylim(0, current_y_max * 1.1) # Chỉ để hở 10% phía trên cho đẹp
+
+            # ĐÂY LÀ DÒNG BỊ LỖI - ĐÃ CĂN THẲNG HÀNG 100%
             ax.set_title(f"{feat} - {title_suffix}", fontsize=12, fontweight='bold')
-            if is_right_col: ax.legend(title="Grade", bbox_to_anchor=(1.05, 1), loc='upper left')
+            if is_right_col: 
+                ax.legend(title="Grade", bbox_to_anchor=(1.05, 1), loc='upper left')
 
-        # --- PHẦN 1: OVERALL (TỔNG HỢP TOÀN BỘ) ---
-        st.subheader("🌐 Overall Factory Distribution (All Thicknesses)")
+        # --- PHẦN VẼ BIỂU ĐỒ ---
+        st.subheader("🌐 Overall Factory Distribution")
         ov_cols = st.columns(2)
         for idx, feat in enumerate(['YS', 'TS', 'EL', 'YPE']):
             if feat in mech_features:
@@ -133,9 +132,7 @@ if uploaded_file is not None:
                     fig_ov.savefig(f"overall_{feat}.png", bbox_inches='tight')
 
         st.markdown("---")
-
-        # --- PHẦN 2: CHI TIẾT TỪNG ĐỘ DÀY ---
-        st.subheader("🔍 Detailed Distribution per Thickness Category")
+        st.subheader("🔍 Detailed Distribution per Thickness")
         thickness_list = sorted(df['厚度歸類'].dropna().unique(), key=lambda x: float(x))
         for thick in thickness_list:
             df_thick = df[df['厚度歸類'] == thick]
