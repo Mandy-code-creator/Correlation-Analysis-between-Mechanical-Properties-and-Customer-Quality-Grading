@@ -62,11 +62,11 @@ if uploaded_file is not None:
                 
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-    # --- TAB 2: DISTRIBUTION ---
+    # --- TAB 2: DISTRIBUTION (PARALLEL VIEW) ---
     with tab2:
         st.header("2. Distribution Analysis (Parallel Clear View)")
         grade_mapping = {'A+B+': 'A+B+數', 'A-B+': 'A-B+數', 'A-B': 'A-B數', 'A-B-': 'A-B-數', 'B+': 'B+數'}
-        colors = ['#2ca02c', '#1f77b4', '#ff7f0e', '#9467bd', '#d62728'] 
+        colors = ['#2ca02c', '#1f77b4', '#ff7f0e', '#9467bd', '#d62728']
         thickness_list = sorted(df['厚度歸類'].dropna().unique(), key=str)
 
         def plot_feature_dist(ax, data, feat, thick, is_right_col=False):
@@ -81,7 +81,7 @@ if uploaded_file is not None:
                 if len(temp_d) > 2:
                     vals_d, wgts_d = temp_d[feat].values, temp_d[col_n].values
                     sns.histplot(x=vals_d, weights=wgts_d, label=label, color=color, bins=k_b, 
-                                 stat='count', alpha=0.45, ax=ax, edgecolor='white', linewidth=0.5)
+                                 stat='count', alpha=0.15, ax=ax, edgecolor='none')
                     m_d = np.average(vals_d, weights=wgts_d)
                     s_d = np.sqrt(np.average((vals_d - m_d)**2, weights=wgts_d))
                     if s_d > 0:
@@ -96,10 +96,9 @@ if uploaded_file is not None:
                 mean_inf.sort(key=lambda x: x['val'])
                 y_max_l = ax.get_ylim()[1]
                 for idx_m, info_m in enumerate(mean_inf):
-                    y_p = y_max_l * (0.95 - (idx_m % 4) * 0.08)
+                    y_p = (0.94 if idx_m % 2 == 0 else 0.86) * y_max_l
                     ax.text(info_m['val'], y_p, f"{info_m['val']:.0f}", color=info_m['color'], 
-                            fontsize=10, fontweight='bold', ha='center', va='center',
-                            bbox=dict(facecolor='white', alpha=0.85, edgecolor=info_m['color'], lw=1.5, boxstyle='round,pad=0.3'))
+                            fontsize=10, fontweight='bold', ha='center', bbox=dict(facecolor='white', alpha=0.7, edgecolor='none'))
 
             ax.set_title(f"{feat} (Thick: {thick})", fontsize=14, fontweight='bold')
             ax.set_ylabel("Count")
@@ -116,6 +115,7 @@ if uploaded_file is not None:
         for thickness in thickness_list:
             df_thickness = df[df['厚度歸類'] == thickness]
             st.markdown(f"## 📏 Analysis for Thickness: **{thickness}**")
+            
             col_ys, col_ts = st.columns(2)
             if 'YS' in mech_features:
                 with col_ys:
@@ -127,6 +127,18 @@ if uploaded_file is not None:
                     fig_ts, ax_ts = plt.subplots(figsize=(10, 5))
                     plot_feature_dist(ax_ts, df_thickness, 'TS', thickness, is_right_col=True)
                     st.pyplot(fig_ts)
+
+            col_el, col_ype = st.columns(2)
+            if 'EL' in mech_features:
+                with col_el:
+                    fig_el, ax_el = plt.subplots(figsize=(10, 5))
+                    plot_feature_dist(ax_el, df_thickness, 'EL', thickness, is_right_col=False)
+                    st.pyplot(fig_el)
+            if 'YPE' in mech_features:
+                with col_ype:
+                    fig_ype, ax_ype = plt.subplots(figsize=(10, 5))
+                    plot_feature_dist(ax_ype, df_thickness, 'YPE', thickness, is_right_col=True)
+                    st.pyplot(fig_ype)
             st.markdown("---")
 
 # --- TAB 3: OPTIMIZATION (Data-Driven Executive View) ---
