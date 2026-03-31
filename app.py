@@ -237,7 +237,7 @@ if uploaded_file is not None:
 
                 row_data = {
                     "Feature": feat,
-                    "Customer Spec Limit": spec_str,
+                    "Current Control Limit": spec_str,
                     "Segment Distribution": seg_dist,
                     "Data-Driven Release Range": release_range,
                     "Target Goal": target_goal,
@@ -387,7 +387,7 @@ if uploaded_file is not None:
                 for row in all_export_data:
                     if row['Thickness'] == thick:
                         pdf.cell(col_widths_3[0], 8, clean_text(row.get("Feature", "")), border=1, align='C')
-                        pdf.cell(col_widths_3[1], 8, clean_text(row.get("Customer Spec Limit", "")), border=1, align='C')
+                        pdf.cell(col_widths_3[1], 8, clean_text(row.get("Current Limit", "")), border=1, align='C')
                         pdf.cell(col_widths_3[2], 8, clean_text(row.get("Segment Distribution", "")), border=1, align='C')
                         pdf.cell(col_widths_3[3], 8, clean_text(row.get("Data-Driven Release Range", "")), border=1, align='C')
                         pdf.cell(col_widths_3[4], 8, clean_text(row.get("Target Goal", "")), border=1, align='C')
@@ -407,13 +407,13 @@ if uploaded_file is not None:
             # ---------------------------------------------------------
             # LƯU VÀ TẢI PDF
             # ---------------------------------------------------------
-            pdf.output("QC_Report_Temp.pdf")
-            with open("QC_Report_Temp.pdf", "rb") as f:
+            pdf.output("Mechanical Properties & Quality Yield Optimizer.pdf")
+            with open("Mechanical Properties & Quality Yield Optimizer.pdf", "rb") as f:
                 pdf_bytes = f.read()
                 
             st.download_button(
-                label="📥 Bấm vào đây để tải PDF Report",
+                label="📥 Download PDF Report",
                 data=pdf_bytes,
-                file_name="QC_Executive_Report.pdf",
+                file_name="Mechanical Properties & Quality Yield Optimizer.pdf",
                 mime="application/pdf"
             )
