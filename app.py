@@ -212,22 +212,38 @@ if uploaded_file is not None:
                 else:
                     seg_dist = "N/A"
 
+                target_grade = 'A-B+數'
+                temp_opt = df_t[[feat, target_grade, 'Total_Count']].dropna()
+                success_prob = None
+                if len(temp_opt) > 0:
+                    temp_opt['bin'] = pd.qcut(temp_opt[feat], q=12, duplicates='drop')
+                    bin_res = temp_opt.groupby('bin', observed=True).agg({
+                        target_grade: 'sum',
+                        'Total_Count': 'sum'
+                    })
+                    bin_res['Success_Rate'] = (bin_res[target_grade] / bin_res['Total_Count'] * 100).fillna(0).round(0).astype(int)
+                    bin_res['Mid'] = bin_res.index.map(lambda x: x.mid).astype(float)
+                    bins_in_ctrl = bin_res[(bin_res['Mid'] >= LCL_I) & (bin_res['Mid'] <= UCL_I)]
+                    if not bins_in_ctrl.empty:
+                        success_prob = bins_in_ctrl['Success_Rate'].mean()
+
                 status = "✅ Safe"
                 if low is not None and safe_val < low:
                     status = "⚠ Risk (below limit)"
                 if high is not None and safe_val > high:
                     status = "⚠ Risk (above limit)"
 
+                # --- SẮP XẾP LẠI THỨ TỰ CÁC CỘT THEO LOGIC CÂU CHUYỆN ---
                 row_data = {
                     "Thickness": thick,
                     "Feature": feat,
-                    "Measured Mean": int(round(mean_val)),
-                    f"Safe Zone (Mean - {sigma_factor}σ)": int(round(safe_val)),
                     "Spec Limit": spec_str,
-                    "Proposed Control Limit": ctrl_limit,
-                    "I-MR Control Limit": ctrl_imr,
                     "Segment Distribution": seg_dist,
-                    "Status": status
+                    "Measured Mean": int(round(mean_val)),
+                    "I-MR Control Limit": ctrl_imr,
+                    f"Safe Zone (Mean - {sigma_factor}σ)": int(round(safe_val)),
+                    "Status": status,
+                    "Proposed Control Limit": ctrl_limit
                 }
                 
                 status_list.append(row_data)
@@ -247,13 +263,11 @@ if uploaded_file is not None:
                     m_v, s_v = np.mean(v), np.std(v, ddof=1)
                     U, L = m_v + sigma_factor*s_v, m_v - sigma_factor*s_v
                     
-                    # Làm tròn số nguyên cho chú thích
                     m_v_int = int(round(m_v))
                     U_int = int(round(U))
                     L_int = int(round(L))
 
                     ax1.plot(v, marker='o', color='blue')
-                    # Gắn giá trị cụ thể vào nhãn
                     ax1.axhline(m_v, color='green', ls='--', label=f'Mean: {m_v_int}')
                     ax1.axhline(U, color='red', ls='--', label=f'UCL (Max): {U_int}')
                     ax1.axhline(L, color='red', ls='--', label=f'LCL (Min): {L_int}')
@@ -272,7 +286,6 @@ if uploaded_file is not None:
                     LCL_MR_int = int(round(LCL_MR))
                     
                     ax2.plot(MR, marker='o', color='orange')
-                    # Gắn giá trị cụ thể vào nhãn biểu đồ MR
                     ax2.axhline(MR_mean, color='green', ls='--', label=f'MR Mean: {MR_mean_int}')
                     ax2.axhline(UCL_MR, color='red', ls='--', label=f'UCL MR: {UCL_MR_int}')
                     ax2.axhline(LCL_MR, color='red', ls='--', label=f'LCL MR: {LCL_MR_int}')
