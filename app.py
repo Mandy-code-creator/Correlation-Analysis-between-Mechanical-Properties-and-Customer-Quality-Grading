@@ -68,28 +68,37 @@ if uploaded_file is not None:
                 display_df[c] = display_df[c].astype(int)
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-    # --- TAB 2: DISTRIBUTION (SMART AUTO SCALING FIX) ---
+    # --- TAB 2: DISTRIBUTION (SMART AUTO SCALING & HIGH-CONTRAST COLORS) ---
     with tab2:
         st.header("2. Mechanical Properties Distribution Analysis")
-
+        
         # Calculate Global Max for Overall section only
         max_counts_ov = []
         for f in ['YS', 'TS', 'EL', 'YPE']:
             if f in df.columns:
                 temp_total = df[count_cols].sum(axis=1)
                 max_counts_ov.append(temp_total.max())
-        global_y_ov = max(max_counts_ov) * 1.3 if max_counts_ov else 300
+        global_y_ov = max(max_counts_ov) * 1.3 if max_counts_ov else 600
 
         def plot_standard_dist(ax, data, feat, title_suffix, is_overall=False, is_right_col=False):
+            # 1. Setup
             N_t = data['Total_Count'].sum()
             k_b = 15 
-            color_map = {'A-B+數': '#1f77b4', 'A-B-數': '#ff7f0e', 'B+數': '#d62728', 'B數': '#7f7f7f', 'A-B數': '#9467bd'}
+            
+            # --- CẬP NHẬT: BẢNG MÀU HIGH-CONTRAST CỰC KỲ DỄ PHÂN BIỆT ---
+            color_map = {
+                'A-B+數': '#2ca02c', # Green (Tốt nhất)
+                'A-B數': '#1f77b4',  # Blue (Tốt)
+                'A-B-數': '#ff7f0e', # Orange (Trung bình)
+                'B+數': '#9467bd',   # Purple (Hơi tệ)
+                'B數': '#d62728'    # Red (Cảnh báo - Rớt cấp)
+            }
             mean_inf = []
             
             # Add subtle dotted grid
             ax.grid(axis='y', linestyle=':', alpha=0.6, zorder=0)
             
-            # Vẽ từng Grade
+            # 2. Vẽ từng Grade
             for col_n in count_cols:
                 temp_d = data[[feat, col_n]].dropna()
                 temp_d = temp_d[temp_d[col_n] > 0]
@@ -129,22 +138,24 @@ if uploaded_file is not None:
             if mean_inf:
                 mean_inf.sort(key=lambda x: x['val'])
                 y_max = ax.get_ylim()[1]
-                levels = [0.90, 0.82, 0.74, 0.66]
-                for i_m, info in enumerate(mean_inf):
-                    y_p = y_max * levels[i_m % len(levels)] # Tránh đè nhãn
+                levels = [0.90, 0.82, 0.74, 0.66] # Tránh đè nhãn
+                
+                for i, info in enumerate(mean_inf):
+                    y_p = y_max * levels[i % len(levels)]
                     ax.text(info['val'], y_p, f"{int(round(info['val']))}", color=info['color'], 
                             fontsize=9, fontweight='bold', ha='center', va='center', zorder=5,
-                            bbox=dict(facecolor='white', alpha=0.8, edgecolor=info['color'], boxstyle='round,pad=0.2'))
+                            bbox=dict(facecolor='white', alpha=0.9, edgecolor=info['color'], boxstyle='round,pad=0.3'))
 
-            # FORMAT LEGEND ĐỂ KHÔNG MẤT CẤP CHẤT LƯỢNG
             ax.set_title(f"{feat} (Thick: {title_suffix})", fontsize=12, fontweight='bold', pad=10)
             ax.set_ylabel("Count", fontsize=10)
+            
+            # Format Legend cho chuyên nghiệp
             if is_right_col:
-                legend_elements = [Patch(facecolor=color_map[k], edgecolor='white', label=k.replace('數',''), alpha=0.5) for k in color_map]
-                ax.legend(handles=legend_elements, title="Grade", title_fontsize='10', fontsize='9', bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0.)
+                ax.legend(title="Grade", title_fontsize='10', fontsize='9', 
+                          bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0.)
 
-        # --- PHẦN VẼ ---
-        st.subheader("🌐 Factory Overall Distribution (Balanced Combined View)")
+        # --- PHẦN VẼ (Hàm vẽ giữ nguyên) ---
+        st.subheader("🌐 Factory Overall Distribution (Standard Combined View)")
         ov_cols = st.columns(2)
         for idx, feat in enumerate(['YS', 'TS', 'EL', 'YPE']):
             if feat in mech_features:
@@ -153,7 +164,6 @@ if uploaded_file is not None:
                     # Pass True for Overall scaling
                     plot_standard_dist(ax_ov, df, feat, "Overall", is_overall=True, is_right_col=(idx % 2 != 0))
                     st.pyplot(fig_ov)
-                    fig_ov.savefig(f"overall_{feat}.png", bbox_inches='tight')
 
         st.markdown("---")
         st.subheader("🔍 Detailed Distribution per Thickness Category")
@@ -168,7 +178,6 @@ if uploaded_file is not None:
                         # Pass False to enable Smart Auto-scaling for each chart
                         plot_standard_dist(ax, df_thick, feat, thick, is_overall=False, is_right_col=(idx % 2 != 0))
                         st.pyplot(fig)
-                        fig.savefig(f"dist_{feat}_{thick}.png", bbox_inches='tight')
             st.markdown("---")
 
     # --- TAB 3: OPTIMIZATION & I-MR CHARTS ---
