@@ -228,10 +228,10 @@ if uploaded_file is not None:
                     "Thickness": thick,
                     "Feature": feat,
                     "Customer Spec Limit": spec_str, # Trưng ra để Sếp so sánh
+                    "Segment Distribution": seg_dist,
                     "Data-Driven Release Range": release_range, # Tính từ thực tế dải hàng tốt
                     "Target Goal": target_goal,
                     "Mill Range (Proposed)": mill_range,
-                    "Segment Distribution": seg_dist,
                     "Status": "✅ Safe" if (low is None or (mean_val - sigma_factor*std_val) >= low) else "⚠ Risk"
                 }
                 
