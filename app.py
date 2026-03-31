@@ -57,7 +57,8 @@ if uploaded_file is not None:
             
         display_df = summary_df.copy()
         display_df.rename(columns={'厚度歸類': 'Thickness'}, inplace=True)
-        display_df.insert(0, 'STT', range(1, len(display_df) + 1))
+        # Đã đổi STT thành No.
+        display_df.insert(0, 'No.', range(1, len(display_df) + 1))
         
         cols_to_int = count_cols + ['Total Coils']
         for c in cols_to_int:
@@ -212,28 +213,13 @@ if uploaded_file is not None:
                 else:
                     seg_dist = "N/A"
 
-                target_grade = 'A-B+數'
-                temp_opt = df_t[[feat, target_grade, 'Total_Count']].dropna()
-                success_prob = None
-                if len(temp_opt) > 0:
-                    temp_opt['bin'] = pd.qcut(temp_opt[feat], q=12, duplicates='drop')
-                    bin_res = temp_opt.groupby('bin', observed=True).agg({
-                        target_grade: 'sum',
-                        'Total_Count': 'sum'
-                    })
-                    bin_res['Success_Rate'] = (bin_res[target_grade] / bin_res['Total_Count'] * 100).fillna(0).round(0).astype(int)
-                    bin_res['Mid'] = bin_res.index.map(lambda x: x.mid).astype(float)
-                    bins_in_ctrl = bin_res[(bin_res['Mid'] >= LCL_I) & (bin_res['Mid'] <= UCL_I)]
-                    if not bins_in_ctrl.empty:
-                        success_prob = bins_in_ctrl['Success_Rate'].mean()
-
                 status = "✅ Safe"
                 if low is not None and safe_val < low:
                     status = "⚠ Risk (below limit)"
                 if high is not None and safe_val > high:
                     status = "⚠ Risk (above limit)"
 
-                # --- SẮP XẾP LẠI THỨ TỰ CÁC CỘT THEO LOGIC CÂU CHUYỆN ---
+                # Sắp xếp đúng logic và đổi tên cột Proposed thành Safe Spec Tolerance
                 row_data = {
                     "Thickness": thick,
                     "Feature": feat,
@@ -243,7 +229,7 @@ if uploaded_file is not None:
                     "I-MR Control Limit": ctrl_imr,
                     f"Safe Zone (Mean - {sigma_factor}σ)": int(round(safe_val)),
                     "Status": status,
-                    "Proposed Control Limit": ctrl_limit
+                    "Safe Spec Tolerance (±5%)": ctrl_limit
                 }
                 
                 status_list.append(row_data)
@@ -302,7 +288,7 @@ if uploaded_file is not None:
             towrite = io.BytesIO()
             pd.DataFrame(all_export_data).to_excel(towrite, index=False, engine='openpyxl')
             towrite.seek(0)
-            st.download_button(label="📥 Tải xuống File Tổng Hợp (Excel)", data=towrite, 
+            st.download_button(label="📥 Download Summary Report (Excel)", data=towrite, 
                                file_name="QC_Proposed_Control_Limits.xlsx")
 
 else:
