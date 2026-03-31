@@ -66,7 +66,8 @@ if uploaded_file is not None:
     with tab2:
         st.header("2. Distribution Analysis (Parallel Clear View)")
         grade_mapping = {'A+B+': 'A+B+數', 'A-B+': 'A-B+數', 'A-B': 'A-B數', 'A-B-': 'A-B-數', 'B+': 'B+數'}
-        colors = ['#2ca02c', '#1f77b4', '#ff7f0e', '#9467bd', '#d62728']
+        # Đã setup màu sắc tương phản rõ ràng
+        colors = ['#2ca02c', '#1f77b4', '#ff7f0e', '#9467bd', '#d62728'] 
         thickness_list = sorted(df['厚度歸類'].dropna().unique(), key=str)
 
         def plot_feature_dist(ax, data, feat, thick, is_right_col=False):
@@ -80,8 +81,11 @@ if uploaded_file is not None:
                 temp_d = temp_d[temp_d[col_n] > 0]
                 if len(temp_d) > 2:
                     vals_d, wgts_d = temp_d[feat].values, temp_d[col_n].values
+                    
+                    # CẢI TIẾN MÀU SẮC BIỂU ĐỒ CỘT Ở ĐÂY (Tăng alpha lên 0.45 và thêm viền trắng)
                     sns.histplot(x=vals_d, weights=wgts_d, label=label, color=color, bins=k_b, 
-                                 stat='count', alpha=0.15, ax=ax, edgecolor='none')
+                                 stat='count', alpha=0.45, ax=ax, edgecolor='white', linewidth=0.5)
+                    
                     m_d = np.average(vals_d, weights=wgts_d)
                     s_d = np.sqrt(np.average((vals_d - m_d)**2, weights=wgts_d))
                     if s_d > 0:
@@ -92,15 +96,11 @@ if uploaded_file is not None:
                     ax.axvline(m_d, color=color, ls='--', lw=2)
                     mean_inf.append({'val': m_d, 'color': color})
 
-            # --- SỬA LỖI GHI ĐÈ NHÃN CHUYÊN SÂU ---
             if mean_inf:
                 mean_inf.sort(key=lambda x: x['val'])
                 y_max_l = ax.get_ylim()[1]
                 for idx_m, info_m in enumerate(mean_inf):
-                    # Trải đều độ cao theo 4 cấp bậc (95%, 87%, 79%, 71%) thay vì chỉ 2 cấp
                     y_p = y_max_l * (0.95 - (idx_m % 4) * 0.08)
-                    
-                    # Thêm boxstyle để đóng khung con số rõ ràng
                     ax.text(info_m['val'], y_p, f"{info_m['val']:.0f}", color=info_m['color'], 
                             fontsize=10, fontweight='bold', ha='center', va='center',
                             bbox=dict(facecolor='white', alpha=0.85, edgecolor=info_m['color'], lw=1.5, boxstyle='round,pad=0.3'))
