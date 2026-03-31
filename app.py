@@ -42,6 +42,24 @@ if uploaded_file is not None:
 
     thickness_list = sorted(df['厚度歸類'].dropna().unique(), key=lambda x: float(x))
 
+    # --- HÀM TÍNH TOÁN THANG ĐO CHUNG (CHÍNH XÁC 100%) ---
+    def get_shared_y(data, features):
+        max_y = 0
+        for feat in features:
+            if feat in data.columns:
+                vd = data.dropna(subset=[feat])
+                if not vd.empty:
+                    f_min, f_max = vd[feat].min(), vd[feat].max()
+                    if f_min < f_max:
+                        # Chia chính xác 15 cột để đồng bộ với histplot
+                        bins = np.linspace(f_min, f_max, 16) 
+                        for c in count_cols:
+                            wd = vd[vd[c] > 0]
+                            if not wd.empty:
+                                cnts, _ = np.histogram(wd[feat], bins=bins, weights=wd[c])
+                                max_y = max(max_y, cnts.max())
+        return max_y * 1.4 if max_y > 0 else 50 # Nới trần 40% để đặt nhãn
+
     # --- 3. CREATE TABS ---
     tab1, tab2, tab3 = st.tabs([
         "1. Summary & Yields", 
@@ -67,24 +85,6 @@ if uploaded_file is not None:
             if c in display_df.columns:
                 display_df[c] = display_df[c].astype(int)
         st.dataframe(display_df, use_container_width=True, hide_index=True)
-
-    # --- HÀM TÍNH TOÁN THANG ĐO CHUNG (CHÍNH XÁC 100%) ---
-    def get_shared_y(data, features):
-        max_y = 0
-        for feat in features:
-            if feat in data.columns:
-                vd = data.dropna(subset=[feat])
-                if not vd.empty:
-                    f_min, f_max = vd[feat].min(), vd[feat].max()
-                    if f_min < f_max:
-                        # Chia chính xác 15 cột để đồng bộ với histplot
-                        bins = np.linspace(f_min, f_max, 16) 
-                        for c in count_cols:
-                            wd = vd[vd[c] > 0]
-                            if not wd.empty:
-                                cnts, _ = np.histogram(wd[feat], bins=bins, weights=wd[c])
-                                max_y = max(max_y, cnts.max())
-        return max_y * 1.4 if max_y > 0 else 50 # Nới trần 40% để đặt nhãn
 
     # --- TAB 2: DISTRIBUTION (CHUẨN XÁC & HIGH-CONTRAST) ---
     with tab2:
@@ -224,7 +224,7 @@ if uploaded_file is not None:
                     
                     overall_status.append({
                         "Feature": feat, 
-                        "Current Control Limit": spec_str_ov,
+                        "Current Limit (2025/12)": spec_str_ov, # <--- ĐỒNG BỘ TÊN CỘT
                         "Segment Distribution": seg_dist_overall,
                         "Data-Driven Release Range": f"{int(round(m_ov - 3*s_ov))}-{int(round(m_ov + 3*s_ov))}",
                         "Target Goal": int(round(m_ov)),
@@ -265,7 +265,7 @@ if uploaded_file is not None:
                     
                     row = {
                         "Feature": feat, 
-                        "Current Control Limit": spec_str,
+                        "Current Limit (2025/12)": spec_str, # <--- ĐỒNG BỘ TÊN CỘT
                         "Segment Distribution": seg_dist,
                         "Data-Driven Release Range": f"{int(round(mv - 3*sv))}-{int(round(mv + 3*sv))}",
                         "Target Goal": int(round(mv)),
@@ -315,7 +315,7 @@ if uploaded_file is not None:
         towrite.seek(0)
         st.sidebar.download_button(label="Click to Download Excel", data=towrite, file_name="QC_Optimization_Report.xlsx")
 
-    # --- PDF EXPORT (ĐÃ FIX LỖI BỊ CẮT XÉN BIỂU ĐỒ I-MR) ---
+    # --- PDF EXPORT ---
     st.markdown("### 🖨️ Export PDF Executive Report")
     def clean(t): return str(t).replace('±', '+/-').replace('–', '-').encode('latin-1', 'ignore').decode('latin-1')
 
@@ -349,13 +349,17 @@ if uploaded_file is not None:
             
             # Trang PDF: Bảng Control Limits
             pdf.add_page(); pdf.set_font('Arial', 'B', 12); pdf.cell(0, 10, f"4. Control Limits & Targets - Thickness: {thick}", ln=True)
-            heads = ["Feature", "Current Control Limit(2025/12)", "Segment Dist", "Release Range", "Target", "Tol", "Mill Range"]; c_w3 = [25, 25, 80, 35, 15, 20, 40]
+            
+            # <--- FIX CỘT PDF RỘNG HƠN & TÊN CỘT ĐỒNG BỘ
+            heads = ["Feature", "Current Limit (2025/12)", "Segment Dist", "Release Range", "Target", "Tol", "Mill Range"]
+            c_w3 = [20, 40, 65, 35, 15, 20, 40] 
+            
             pdf.set_font('Arial', 'B', 8)
             for i, h in enumerate(heads): pdf.cell(c_w3[i], 7, clean(h), border=1, align='C')
             pdf.ln(); pdf.set_font('Arial', '', 7)
             for row in all_export_data:
                 if row['Thickness'] == thick:
-                    v_list = [row["Feature"], row["Current Control Limit(2025/12)"], row["Segment Distribution"], row["Data-Driven Release Range"], row["Target Goal"], row[f"Tolerance (±{sigma_choice}σ)"], row["Mill Range (Proposed)"]]
+                    v_list = [row["Feature"], row["Current Limit (2025/12)"], row["Segment Distribution"], row["Data-Driven Release Range"], row["Target Goal"], row[f"Tolerance (±{sigma_choice}σ)"], row["Mill Range (Proposed)"]]
                     for i, v in enumerate(v_list): pdf.cell(c_w3[i], 7, clean(v), border=1, align='C')
                     pdf.ln()
             
