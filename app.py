@@ -129,10 +129,10 @@ if uploaded_file is not None:
                     st.pyplot(fig_ts)
             st.markdown("---")
 
-    # --- TAB 3: OPTIMIZATION (Mill Range & Release Range) ---
+    # --- TAB 3: OPTIMIZATION (Data-Driven Executive View) ---
     with tab3:
         st.header("3. Production Control Limits & Goals (A-B & Above Focused)")
-        sigma_factor = st.radio("Select Sigma Factor for Safety Zone", [2.0, 2.5, 3.0], index=0)
+        sigma_factor = st.radio("Select Sigma Factor for Mill Safety Zone", [2.0, 2.5, 3.0], index=0)
 
         spec_limits = {
             "YS": (405, 500), "TS": (415, 550), "EL": (25, None), "YPE": (4, None)
@@ -140,8 +140,6 @@ if uploaded_file is not None:
 
         thickness_list = sorted(df['厚度歸類'].dropna().unique(), key=str)
         all_export_data = []
-        
-        # Dùng để lưu dữ liệu vẽ biểu đồ I-MR sau khi lọc cấp độ A-B trở lên
         plot_data_dict = {}
 
         for thick in thickness_list:
@@ -150,26 +148,28 @@ if uploaded_file is not None:
             plot_data_dict[thick] = {}
             status_list = []
             
-            # Khai báo các cấp độ chất lượng tốt (A-B và trở lên)
             good_grades = [c for c in ['A+B+數', 'A-B+數', 'A-B數'] if c in df_t.columns]
 
             for feat in mech_features:
                 temp_calc = df_t[[feat] + good_grades].dropna(subset=[feat])
                 if len(temp_calc) == 0: continue
 
-                # Chỉ tính toán dựa trên các cuộn có chứa hàng từ A-B trở lên
                 temp_calc['Good_Count'] = temp_calc[good_grades].sum(axis=1)
                 temp_calc_good = temp_calc[temp_calc['Good_Count'] > 0]
 
+                low, high = spec_limits.get(feat, (None, None))
+                spec_str = f"{int(low)}–{int(high)}" if low and high else (f">={int(low)}" if low else "N/A")
+
+                # --- CALCULATE DATA-DRIVEN LIMITS ---
                 if not temp_calc_good.empty:
                     vals_good = temp_calc_good[feat].values
                     wgts_good = temp_calc_good['Good_Count'].values
                     
-                    # Tính Mean và Std Trọng số ban đầu
+                    # 1. Target Goal (Mean)
                     mean_val = np.average(vals_good, weights=wgts_good)
                     std_val = np.sqrt(np.average((vals_good - mean_val)**2, weights=wgts_good))
                     
-                    # Lọc nhiễu (Outliers 3-sigma) của riêng tập dữ liệu TỐT này
+                    # Lọc nhiễu Outliers (Giữ lại phổ dữ liệu thuần khiết)
                     mask = (vals_good >= mean_val - 3*std_val) & (vals_good <= mean_val + 3*std_val)
                     if mask.sum() > 0:
                         vals_good = vals_good[mask]
@@ -177,56 +177,33 @@ if uploaded_file is not None:
                         mean_val = np.average(vals_good, weights=wgts_good)
                         std_val = np.sqrt(np.average((vals_good - mean_val)**2, weights=wgts_good))
                     
-                    # Lưu lại vals_good để vẽ biểu đồ
                     plot_data_dict[thick][feat] = vals_good
+                    target_goal = int(round(mean_val))
+                    
+                    # 2. Data-Driven Release Range (3 Sigma: 99.73% natural spread of GOOD coils)
+                    rel_low_raw = mean_val - 3 * std_val
+                    rel_high_raw = mean_val + 3 * std_val
+                    
+                    # Đảm bảo Release Range thực tế không được phép lấn ra ngoài Customer Spec
+                    rel_low = max(rel_low_raw, low) if low is not None else rel_low_raw
+                    rel_high = min(rel_high_raw, high) if high is not None else rel_high_raw
+                    
+                    release_range = f"{int(round(rel_low))}–{int(round(rel_high))}" if high is not None else f">={int(round(rel_low))}"
+                    
+                    # 3. Mill Range (Tighter operational control based on selected sigma_factor)
+                    mill_low_raw = mean_val - sigma_factor * std_val
+                    mill_high_raw = mean_val + sigma_factor * std_val
+                    
+                    mill_low = max(mill_low_raw, rel_low)
+                    mill_high = min(mill_high_raw, rel_high)
+                    
+                    mill_range = f"{int(round(mill_low))}–{int(round(mill_high))}" if high is not None else f">={int(round(mill_low))}"
                 else:
-                    # Dự phòng nếu toàn bộ lô hàng là hàng kém (rất hiếm khi xảy ra)
-                    vals = temp_calc[feat].values
-                    mean_val = np.mean(vals)
-                    std_val = np.std(vals, ddof=1)
-                    plot_data_dict[thick][feat] = vals
-
-                # --- I-MR Limits (Đã được lọc Tinh Hoa) ---
-                UCL_I = mean_val + sigma_factor*std_val
-                LCL_I = mean_val - sigma_factor*std_val
-                
-                low, high = spec_limits.get(feat, (None, None))
-
-                # --- CALCULATE INTERNAL RELEASE RANGE & MILL RANGE ---
-                prac_low, prac_high = None, None
-                
-                if low is not None and high is not None:
-                    theo_low = low + 0.05*(high-low)
-                    theo_high = high - 0.05*(high-low)
-                    release_range = f"{int(round(theo_low))}–{int(round(theo_high))}"
-                    
-                    prac_low = max(theo_low, LCL_I)
-                    prac_high = min(theo_high, UCL_I)
-                    
-                    if prac_low > prac_high: prac_low, prac_high = theo_low, theo_high
-                    mill_range = f"{int(round(prac_low))}–{int(round(prac_high))}"
-                    
-                elif low is not None:
-                    theo_low = low + 0.05*low
-                    release_range = f">={int(round(theo_low))}"
-                    
-                    prac_low = max(theo_low, LCL_I)
-                    mill_range = f">={int(round(prac_low))}"
-                else:
+                    target_goal = "N/A"
                     release_range = "N/A"
                     mill_range = "N/A"
-
-                # --- TARGET GOAL ---
-                # Vì mean_val giờ đây đã là trung bình của riêng nhóm A-B trở lên, Target chính là mean_val
-                if not temp_calc_good.empty:
-                    target_goal = int(round(mean_val))
-                else:
-                    if prac_low is not None and prac_high is not None:
-                        target_goal = int(round((prac_low + prac_high) / 2))
-                    elif prac_low is not None:
-                        target_goal = int(round(prac_low + 5))
-                    else:
-                        target_goal = "N/A"
+                    mean_val = 0
+                    std_val = 0
 
                 # --- SEGMENT DISTRIBUTION ---
                 seg_A_Bplusplus = df_t['A+B+數'].sum()
@@ -250,11 +227,11 @@ if uploaded_file is not None:
                 row_data = {
                     "Thickness": thick,
                     "Feature": feat,
-                    "Internal Release Range": release_range, 
-                    "Segment Distribution": seg_dist,
+                    "Customer Spec Limit": spec_str, # Trưng ra để Sếp so sánh
+                    "Data-Driven Release Range": release_range, # Tính từ thực tế dải hàng tốt
                     "Target Goal": target_goal,
                     "Mill Range (Proposed)": mill_range,
-                    "Current Capability (I-MR)": f"{int(round(LCL_I))}–{int(round(UCL_I))}",
+                    "Segment Distribution": seg_dist,
                     "Status": "✅ Safe" if (low is None or (mean_val - sigma_factor*std_val) >= low) else "⚠ Risk"
                 }
                 
@@ -269,11 +246,10 @@ if uploaded_file is not None:
             # --- I-MR Charts ---
             for feat in mech_features:
                 if feat in plot_data_dict[thick]:
-                    v = plot_data_dict[thick][feat] # Chỉ lấy dữ liệu TỐT để vẽ
+                    v = plot_data_dict[thick][feat] 
                     if len(v) > 1:
                         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 7))
                         
-                        # Sử dụng thống kê thực tế từ mảng đã lọc
                         m_v = np.mean(v)
                         s_v = np.std(v, ddof=1)
                         U, L = m_v + sigma_factor*s_v, m_v - sigma_factor*s_v
