@@ -109,7 +109,15 @@ if uploaded_file is not None:
                     ax.text(info['val'], y_p, f"{info['val']:.1f}", color=info['color'], 
                             fontsize=9, fontweight='bold', ha='center',
                             bbox=dict(facecolor='white', alpha=0.8, edgecolor=info['color'], boxstyle='round,pad=0.2'))
+# --- CẬP NHẬT: ÉP CÂN THANG ĐO Y ĐỂ ĐỒNG NHẤT BỐ CỤC ---
+        # Chặn đứng việc tạo khoảng trắng blanco quá mức làm nhỏ biểu đồ YPE
 
+        # 1. Tính toán giá trị cao nhất của các cột Histogram
+        max_bar_height = data[count_cols].sum(axis=1).max()
+        
+        # 2. Thiết lập giới hạn trên của trục Y cao hơn cột cao nhất khoảng 15-20%
+        # Đây là khoảng hở vừa đủ đẹp, không bị pha loãng blanco
+        ax.set_ylim(0, max_bar_height * 1.2)
             ax.set_title(f"{feat} - {title_suffix}", fontsize=12, fontweight='bold')
             if is_right_col: ax.legend(title="Grade", bbox_to_anchor=(1.05, 1), loc='upper left')
 
