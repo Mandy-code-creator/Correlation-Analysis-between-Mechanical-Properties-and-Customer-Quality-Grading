@@ -68,95 +68,104 @@ if uploaded_file is not None:
             display_df[c] = display_df[c].astype(int)
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-    # --- TAB 2: DISTRIBUTION (FIXED: BALANCED OVERALL & READABLE DETAILS) ---
+   # --- TAB 2: DISTRIBUTION (PROFESSIONAL QC STYLE) ---
     with tab2:
         st.header("2. Mechanical Properties Distribution Analysis")
         
-        # 1. FIND GLOBAL LIMIT FOR OVERALL SECTION ONLY
+        # Calculate Global Max for Overall section scaling
         max_counts_ov = []
         for f in ['YS', 'TS', 'EL', 'YPE']:
             if f in df.columns:
-                temp_total = df[count_cols].sum(axis=1)
-                max_counts_ov.append(temp_total.max())
-        # Large scale for Overall
-        global_y_limit_ov = max(max_counts_ov) * 1.25 if max_counts_ov else 600
+                max_counts_ov.append(df[count_cols].sum(axis=1).max())
+        global_y_ov = max(max_counts_ov) * 1.3 if max_counts_ov else 300
 
-        def plot_standard_dist(ax, data, feat, title_suffix, is_overall=False, is_right_col=False):
-            N_t = data['Total_Count'].sum()
+        def plot_qc_dist(ax, data, feat, title, is_overall=False, is_right=False):
+            # 1. Setup
             k_b = 15 
-            color_map = {'A-B+數': '#2ca02c', 'A-B-數': '#ff7f0e', 'B+數': '#d62728', 'B數': '#9467bd', 'A-B數': '#1f77b4'}
+            color_map = {'A-B+數': '#1f77b4', 'A-B數': '#ff7f0e', 'A-B-數': '#9467bd', 'B+數': '#d62728', 'B數': '#7f7f7f'}
             mean_inf = []
             
+            # Add subtle dotted grid (as seen in your image)
+            ax.grid(axis='y', linestyle=':', alpha=0.6, zorder=0)
+            
+            # 2. Plotting Histogram & Normal Curve
             for col_n in count_cols:
                 temp_d = data[[feat, col_n]].dropna()
                 temp_d = temp_d[temp_d[col_n] > 0]
-                if len(temp_d) >= 1:
-                    vals_d, wgts_d = temp_d[feat].values, temp_d[col_n].values
+                if not temp_d.empty:
+                    vals, wgts = temp_d[feat].values, temp_d[col_n].values
                     color = color_map.get(col_n, '#7f7f7f')
                     
-                    sns.histplot(x=vals_d, weights=wgts_d, label=col_n.replace('數',''), 
-                                 color=color, bins=k_b, stat='count', alpha=0.4, ax=ax, edgecolor='white')
+                    # Histogram
+                    sns.histplot(x=vals, weights=wgts, label=col_n.replace('數',''), 
+                                 color=color, bins=k_b, stat='count', alpha=0.4, ax=ax, zorder=2)
                     
-                    m_d = np.average(vals_d, weights=wgts_d)
-                    s_d = np.sqrt(np.average((vals_d - m_d)**2, weights=wgts_d))
-                    ax.axvline(m_d, color=color, ls='--', lw=2)
-                    mean_inf.append({'val': m_d, 'color': color})
+                    # Stats
+                    m = np.average(vals, weights=wgts)
+                    s = np.sqrt(np.average((vals - m)**2, weights=wgts))
+                    
+                    # Vertical Mean Line
+                    ax.axvline(m, color=color, ls='--', lw=1.5, zorder=3)
+                    mean_inf.append({'val': m, 'color': color})
 
-                    if len(vals_d) > 2 and s_d > 0:
-                        x_range = np.linspace(m_d - 4*s_d, m_d + 4*s_d, 100)
-                        bin_w = (vals_d.max() - vals_d.min()) / k_b if vals_d.max() != vals_d.min() else 1
-                        ax.plot(x_range, stats.norm.pdf(x_range, m_d, s_d) * wgts_d.sum() * bin_w, color=color, lw=2)
+                    # Normal Distribution Curve
+                    if len(vals) > 2 and s > 0:
+                        x_r = np.linspace(vals.min() - 5, vals.max() + 5, 100)
+                        bin_w = (vals.max() - vals.min()) / k_b if vals.max() != vals_d.min() else 1
+                        ax.plot(x_r, stats.norm.pdf(x_r, m, s) * wgts.sum() * bin_w, color=color, lw=2, zorder=4)
 
-            # --- DYNAMIC SCALING LOGIC ---
-            if is_overall:
-                # Use the big global scale for Overall charts
-                current_limit = global_y_limit_ov
-            else:
-                # Auto-scale for Detailed charts so bars are visible
-                local_max = data[count_cols].sum(axis=1).max()
-                current_limit = local_max * 1.3 if local_max > 0 else 100
-            
-            ax.set_ylim(0, current_limit)
+            # 3. Smart Scaling
+            y_limit = global_y_ov if is_overall else data[count_cols].sum(axis=1).max() * 1.3
+            ax.set_ylim(0, y_limit if y_limit > 0 else 100)
 
-            # Labels staggered based on current limit
+            # 4. Precise Staggered Labels (Matches your Image)
             if mean_inf:
                 mean_inf.sort(key=lambda x: x['val'])
-                levels = [0.92, 0.82, 0.72, 0.62] 
-                for i_m, info in enumerate(mean_inf):
-                    y_p = current_limit * levels[i_m % len(levels)]
-                    ax.text(info['val'], y_p, f"{info['val']:.1f}", color=info['color'], 
-                            fontsize=8, fontweight='bold', ha='center', va='center',
-                            bbox=dict(facecolor='white', alpha=0.9, edgecolor=info['color'], boxstyle='round,pad=0.2'))
+                # Start labels near the top and step down
+                y_max = ax.get_ylim()[1]
+                levels = [0.90, 0.82, 0.74, 0.66, 0.58]
+                
+                for i, info in enumerate(mean_inf):
+                    y_pos = y_max * levels[i % len(levels)]
+                    ax.text(info['val'], y_pos, f"{int(round(info['val']))}", 
+                            color=info['color'], fontsize=9, fontweight='bold',
+                            ha='center', va='center', zorder=5,
+                            bbox=dict(facecolor='white', alpha=0.9, edgecolor=info['color'], boxstyle='round,pad=0.3'))
 
-            ax.set_title(f"{feat} - {title_suffix}", fontsize=12, fontweight='bold')
-            if is_right_col: 
-                ax.legend(title="Grade", bbox_to_anchor=(1.05, 1), loc='upper left')
+            # 5. Title & Labels Formatting
+            ax.set_title(f"{feat} (Thick: {title})", fontsize=12, fontweight='bold', pad=10)
+            ax.set_ylabel("Count", fontsize=10)
+            ax.set_xlabel("") # Keep X-axis clean
+            
+            # Professional Legend on the right
+            if is_right:
+                ax.legend(title="Grade", title_fontsize='10', fontsize='9', 
+                          bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0.)
 
-        # --- DRAWING SECTION ---
-        st.subheader("🌐 Overall Factory Distribution")
+        # --- Tab Drawing Logic (Overall & Detailed) ---
+        st.subheader("🌐 Factory Overall Distribution")
         ov_cols = st.columns(2)
         for idx, feat in enumerate(['YS', 'TS', 'EL', 'YPE']):
             if feat in mech_features:
                 with ov_cols[idx % 2]:
-                    fig_ov, ax_ov = plt.subplots(figsize=(10, 5))
-                    # Set is_overall=True
-                    plot_standard_dist(ax_ov, df, feat, "Overall", is_overall=True, is_right_col=(idx % 2 != 0))
-                    st.pyplot(fig_ov)
+                    fig, ax = plt.subplots(figsize=(10, 5))
+                    plot_qc_dist(ax, df, feat, "Overall", is_overall=True, is_right=(idx % 2 != 0))
+                    st.pyplot(fig)
 
         st.markdown("---")
-        st.subheader("🔍 Detailed Distribution per Thickness")
+        st.subheader("🔍 Thickness Detailed Analysis")
         thickness_list = sorted(df['厚度歸類'].dropna().unique(), key=lambda x: float(x))
         for thick in thickness_list:
             df_thick = df[df['厚度歸類'] == thick]
-            st.markdown(f"### 📏 Thickness Grade: **{thick}**")
+            st.markdown(f"### 📏 Category: **{thick}**")
             cols_dist = st.columns(2)
             for idx, feat in enumerate(['YS', 'TS', 'EL', 'YPE']):
                 if feat in mech_features:
                     with cols_dist[idx % 2]:
                         fig, ax = plt.subplots(figsize=(10, 5))
-                        # Set is_overall=False for auto-scaling
-                        plot_standard_dist(ax, df_thick, feat, f"Thick {thick}", is_overall=False, is_right_col=(idx % 2 != 0))
+                        plot_qc_dist(ax, df_thick, feat, thick, is_overall=False, is_right=(idx % 2 != 0))
                         st.pyplot(fig)
+            st.markdown("---")
 
 # --- TAB 3: OPTIMIZATION ---
     with tab3:
