@@ -86,7 +86,7 @@ if uploaded_file is not None:
                 display_df[c] = display_df[c].astype(int)
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-    # --- TAB 2: DISTRIBUTION (CHUẨN XÁC & HIGH-CONTRAST) ---
+    # --- TAB 2: DISTRIBUTION (FIXED SEABORN VALUEERROR) ---
     with tab2:
         st.header("2. Mechanical Properties Distribution Analysis")
 
@@ -108,7 +108,9 @@ if uploaded_file is not None:
             vd = data.dropna(subset=[feat])
             if vd.empty: return
             f_min, f_max = vd[feat].min(), vd[feat].max()
-            if f_min == f_max: return
+            if f_min >= f_max: return # Cập nhật chặn lỗi nếu min max trùng nhau
+            
+            # Khóa cứng Bins
             bins_arr = np.linspace(f_min, f_max, k_b + 1)
             
             # Vẽ dữ liệu
@@ -119,9 +121,9 @@ if uploaded_file is not None:
                     vals, wgts = temp_d[feat].values, temp_d[col_n].values
                     color = color_map.get(col_n, '#7f7f7f')
                     
-                    # Histogram sử dụng bins_arr khóa cứng
-                    sns.histplot(x=vals, weights=wgts, bins=bins_arr, color=color, 
-                                 stat='count', alpha=0.4, ax=ax, edgecolor='white', zorder=2)
+                    # --- THAY THẾ SEABORN BẰNG MATPLOTLIB ĐỂ TRÁNH VALUEERROR ---
+                    ax.hist(vals, bins=bins_arr, weights=wgts, color=color, 
+                            alpha=0.4, edgecolor='white', zorder=2)
                     
                     m = np.average(vals, weights=wgts)
                     s = np.sqrt(np.average((vals - m)**2, weights=wgts))
@@ -191,7 +193,6 @@ if uploaded_file is not None:
                         st.pyplot(fig)
                         fig.savefig(f"dist_{feat}_{thick}.png", bbox_inches='tight')
             st.markdown("---")
-
     # --- TAB 3: OPTIMIZATION & I-MR CHARTS ---
     with tab3:
         st.header("3. Production Control Limits & Goals (A-B & Above Focused)")
