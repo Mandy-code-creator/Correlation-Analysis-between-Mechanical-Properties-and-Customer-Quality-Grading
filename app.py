@@ -152,7 +152,7 @@ if uploaded_file is not None:
                     fig_ype.savefig(f"dist_YPE_{thickness}.png", bbox_inches='tight') # Lệnh chụp ảnh YPE
             st.markdown("---")
 
-    # --- TAB 3: OPTIMIZATION (Data-Driven Executive View) ---
+# --- TAB 3: OPTIMIZATION (Data-Driven Executive View) ---
     with tab3:
         st.header("3. Production Control Limits & Goals (A-B & Above Focused)")
         
@@ -235,6 +235,7 @@ if uploaded_file is not None:
                 else:
                     seg_dist = "N/A"
 
+                # --- ROW DATA (Đã loại bỏ cột Status) ---
                 row_data = {
                     "Feature": feat,
                     "Current Control Limit": spec_str,
@@ -242,8 +243,7 @@ if uploaded_file is not None:
                     "Data-Driven Release Range": release_range,
                     "Target Goal": target_goal,
                     f"Tolerance (±{sigma_choice}σ)": tolerance_val, 
-                    "Mill Range (Proposed)": mill_range,
-                    "Status": "✅ Safe" if (low is None or (mean_val - sigma_choice*std_val) >= low) else "⚠ Risk"
+                    "Mill Range (Proposed)": mill_range
                 }
                 
                 status_list.append(row_data)
@@ -295,7 +295,6 @@ if uploaded_file is not None:
             towrite.seek(0)
             st.download_button(label="📥 Download Executive Report (Excel)", data=towrite, 
                                file_name="QC_Mill_Range_Report.xlsx")
-
     # =========================================================================
     # --- XUẤT BÁO CÁO PDF (EXECUTIVE PDF REPORT) ---
     # =========================================================================
@@ -309,7 +308,7 @@ if uploaded_file is not None:
         return text.encode('latin-1', 'ignore').decode('latin-1')
 
     if st.button("Generate & Download PDF Report"):
-        with st.spinner("Đang tổng hợp dữ liệu và kết xuất PDF..."):
+        with st.spinner("Compiling data and generating PDF report..."):
             
             pdf = FPDF(orientation='L') 
             
