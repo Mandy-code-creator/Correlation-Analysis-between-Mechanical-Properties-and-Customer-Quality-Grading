@@ -163,43 +163,51 @@ if uploaded_file is not None:
                 low, high = spec_limits.get(feat, (None, None))
                 spec_str = f"{int(low)}–{int(high)}" if low and high else (f">={int(low)}" if low else "N/A")
 
-                # --- CALCULATE DATA-DRIVEN LIMITS (Căn lề thẳng với dòng spec_str) ---
+# --- CALCULATE DATA-DRIVEN LIMITS (ĐỒNG BỘ 100% VỚI BIỂU ĐỒ) ---
                 if not temp_calc_good.empty:
                     vals_good = temp_calc_good[feat].values
                     wgts_good = temp_calc_good['Good_Count'].values
                     
-                    # Tính toán Mean và Std Dev từ dữ liệu hàng Tốt
-                    mean_val = np.average(vals_good, weights=wgts_good)
-                    std_val = np.sqrt(np.average((vals_good - mean_val)**2, weights=wgts_good))
+                    # Bước 1: Tính toán sơ bộ (để tìm ngưỡng lọc nhiễu)
+                    m_raw = np.average(vals_good, weights=wgts_good)
+                    s_raw = np.sqrt(np.average((vals_good - m_raw)**2, weights=wgts_good))
                     
-                    # Lọc nhiễu Outliers
-                    mask = (vals_good >= mean_val - 3*std_val) & (vals_good <= mean_val + 3*std_val)
+                    # Bước 2: Lọc nhiễu Outliers (3-Sigma) - Đây là chìa khóa để khớp con số 426
+                    mask = (vals_good >= m_raw - 3*s_raw) & (vals_good <= m_raw + 3*s_raw)
+                    
                     if mask.sum() > 0:
-                        vals_good = vals_good[mask]
-                        wgts_good = wgts_good[mask]
-                        mean_val = np.average(vals_good, weights=wgts_good)
-                        std_val = np.sqrt(np.average((vals_good - mean_val)**2, weights=wgts_good))
+                        vals_final = vals_good[mask]
+                        wgts_final = wgts_good[mask]
+                        # Tính toán các giá trị chính thức từ tập dữ liệu "sạch"
+                        mean_val = np.average(vals_final, weights=wgts_final)
+                        std_val = np.sqrt(np.average((vals_final - mean_val)**2, weights=wgts_final))
+                    else:
+                        # Nếu không lọc được gì thì dùng dữ liệu gốc
+                        mean_val, std_val = m_raw, s_raw
+                        vals_final = vals_good
                     
-                    plot_data_dict[thick][feat] = vals_good
+                    # QUAN TRỌNG: Gán dữ liệu đã lọc vào biểu đồ để đồng bộ 100%
+                    plot_data_dict[thick][feat] = vals_final
+                    
                     target_goal = int(round(mean_val))
                     
-                    # INTERNAL RELEASE RANGE
+                    # 2. INTERNAL RELEASE RANGE (Dải 3-sigma sạch)
                     rel_low = mean_val - 3 * std_val
                     rel_high = mean_val + 3 * std_val
                     release_range = f"{int(round(rel_low))}–{int(round(rel_high))}"
                     
-                    # MILL RANGE (PROPOSED)
+                    # 3. MILL RANGE (PROPOSED) (Dải vận hành dựa trên Mean sạch)
                     mill_low = mean_val - sigma_choice * std_val
                     mill_high = mean_val + sigma_choice * std_val
                     mill_range = f"{int(round(mill_low))}–{int(round(mill_high))}"
 
-                    # TOLERANCE
+                    # 4. TOLERANCE
                     tolerance_val = int(round(sigma_choice * std_val))
                 else:
                     target_goal, release_range, mill_range, tolerance_val = "N/A", "N/A", "N/A", "N/A"
-                    mean_val = 0 # Tránh lỗi ở dòng Status phía dưới
+                    mean_val = 0 
 
-                # --- SEGMENT DISTRIBUTION (Căn lề thẳng với khối IF phía trên) ---
+                # --- SEGMENT DISTRIBUTION (Giữ nguyên phần thống kê tỷ lệ) ---
                 seg_total = df_t[count_cols].sum().sum()
                 if seg_total > 0:
                     seg_dist = ", ".join([f"{k.replace('數','')}: {int(round(df_t[k].sum()/seg_total*100))}%" for k in count_cols])
@@ -209,7 +217,7 @@ if uploaded_file is not None:
                 # --- ROW DATA ---
                 row_data = {
                     "Feature": feat,
-                    "Customer Spec Limit": spec_str,
+                    "Internal Standard": spec_str,
                     "Segment Distribution": seg_dist,
                     "Data-Driven Release Range": release_range,
                     "Target Goal": target_goal,
@@ -220,7 +228,7 @@ if uploaded_file is not None:
                 
                 status_list.append(row_data)
                 
-                # Thêm Thickness vào export data
+                # Thêm vào danh sách xuất Excel
                 export_row = row_data.copy()
                 export_row['Thickness'] = thick
                 all_export_data.append(export_row)
