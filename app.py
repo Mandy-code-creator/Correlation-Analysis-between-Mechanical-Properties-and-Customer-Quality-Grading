@@ -161,51 +161,41 @@ with tab3:
             low, high = spec_limits.get(feat, (None, None))
             spec_str = f"{int(low)}–{int(high)}" if low and high else (f">={int(low)}" if low else "N/A")
 
-            # --- CALCULATE DATA-DRIVEN LIMITS ---
-            if not temp_calc_good.empty:
-                vals_good = temp_calc_good[feat].values
-                wgts_good = temp_calc_good['Good_Count'].values
-                
-                # 1. Target Goal (Mean)
-                mean_val = np.average(vals_good, weights=wgts_good)
-                std_val = np.sqrt(np.average((vals_good - mean_val)**2, weights=wgts_good))
-                
-                # Lọc nhiễu Outliers
-                mask = (vals_good >= mean_val - 3*std_val) & (vals_good <= mean_val + 3*std_val)
-                if mask.sum() > 0:
-                    vals_good = vals_good[mask]
-                    wgts_good = wgts_good[mask]
+            # --- CALCULATE DATA-DRIVEN LIMITS (100% FROM ACTUAL DATA) ---
+                if not temp_calc_good.empty:
+                    vals_good = temp_calc_good[feat].values
+                    wgts_good = temp_calc_good['Good_Count'].values
+                    
+                    # 1. Tính toán Mean và Std Dev từ dữ liệu hàng Tốt
                     mean_val = np.average(vals_good, weights=wgts_good)
                     std_val = np.sqrt(np.average((vals_good - mean_val)**2, weights=wgts_good))
-                
-                plot_data_dict[thick][feat] = vals_good
-                target_goal = int(round(mean_val))
-                
-                # 2. Data-Driven Release Range (3 Sigma)
-                rel_low_raw = mean_val - 3 * std_val
-                rel_high_raw = mean_val + 3 * std_val
-                rel_low = max(rel_low_raw, low) if low is not None else rel_low_raw
-                rel_high = min(rel_high_raw, high) if high is not None else rel_high_raw
-                release_range = f"{int(round(rel_low))}–{int(round(rel_high))}" if high is not None else f">={int(round(rel_low))}"
-                
-                # 3. Mill Range (Sử dụng sigma_choice)
-                mill_low_raw = mean_val - sigma_choice * std_val
-                mill_high_raw = mean_val + sigma_choice * std_val
-                mill_low = max(mill_low_raw, rel_low)
-                mill_high = min(mill_high_raw, rel_high)
-                mill_range = f"{int(round(mill_low))}–{int(round(mill_high))}" if high is not None else f">={int(round(mill_low))}"
+                    
+                    # Lọc nhiễu Outliers để lấy "phần tinh túy" nhất
+                    mask = (vals_good >= mean_val - 3*std_val) & (vals_good <= mean_val + 3*std_val)
+                    if mask.sum() > 0:
+                        vals_good = vals_good[mask]
+                        wgts_good = wgts_good[mask]
+                        mean_val = np.average(vals_good, weights=wgts_good)
+                        std_val = np.sqrt(np.average((vals_good - mean_val)**2, weights=wgts_good))
+                    
+                    target_goal = int(round(mean_val))
+                    
+                    # 2. INTERNAL RELEASE RANGE: Phân tích từ dữ liệu (Dải 3-sigma tự nhiên)
+                    # Không dùng hàm min/max để chặn theo Spec nữa, để lộ ra năng lực thực tế
+                    rel_low = mean_val - 3 * std_val
+                    rel_high = mean_val + 3 * std_val
+                    release_range = f"{int(round(rel_low))}–{int(round(rel_high))}"
+                    
+                    # 3. MILL RANGE (PROPOSED): Vùng vận hành tối ưu quanh Target
+                    mill_low = mean_val - sigma_choice * std_val
+                    mill_high = mean_val + sigma_choice * std_val
+                    mill_range = f"{int(round(mill_low))}–{int(round(mill_high))}"
 
-                # 4. Tính toán giá trị Tolerance thực tế
-                tolerance_val = int(round(sigma_choice * std_val))
+                    # 4. TOLERANCE: Biên độ thực tế máy đang chạy ổn định
+                    tolerance_val = int(round(sigma_choice * std_val))
 
-            else:
-                target_goal = "N/A"
-                release_range = "N/A"
-                mill_range = "N/A"
-                tolerance_val = "N/A"
-                mean_val = 0
-                std_val = 0
-
+                else:
+                    target_goal, release_range, mill_range, tolerance_val = "N/A", "N/A", "N/A", "N/A"
             # --- SEGMENT DISTRIBUTION ---
             seg_total = df_t[count_cols].sum().sum()
             if seg_total > 0:
