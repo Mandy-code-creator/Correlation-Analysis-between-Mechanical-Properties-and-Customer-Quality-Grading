@@ -199,7 +199,6 @@ if uploaded_file is not None:
     with tab3:
         st.header("3. Production Control Limits & Goals (A-B & Above Focused)")
         
-        sigma_choice = st.radio("Select Confidence Interval (Sigma Factor)", [2.0, 2.5, 3.0], index=0)
         spec_limits = {"YS": (405, 500), "TS": (415, 550), "EL": (25, None), "YPE": (4, None)}
         good_cols = [c for c in ['A-B+數', 'A-B數'] if c in df.columns]
 
@@ -226,10 +225,10 @@ if uploaded_file is not None:
                         "Feature": feat, 
                         "Current Limit (2025/12)": spec_str_ov, 
                         "Segment Distribution": seg_dist_overall,
-                        "Data-Driven Release Range": f"{int(round(m_ov - 3*s_ov))}-{int(round(m_ov + 3*s_ov))}",
-                        "Target Goal": int(round(m_ov)),
-                        f"Tolerance (±{sigma_choice}σ)": int(round(sigma_choice*s_ov)),
-                        "Mill Range (Proposed)": f"{int(round(m_ov - sigma_choice*s_ov))}-{int(round(m_ov + sigma_choice*s_ov))}"
+                        "TARGET GOAL": int(round(m_ov)),
+                        "TOLERANCE": int(round(s_ov)),
+                        "MILL RANGE 1*SIGMA": f"{int(round(m_ov - 1*s_ov))}-{int(round(m_ov + 1*s_ov))}",
+                        "RELEASE RANGE 2*SIGMA": f"{int(round(m_ov - 2*s_ov))}-{int(round(m_ov + 2*s_ov))}"
                     })
         st.dataframe(pd.DataFrame(overall_export_data), use_container_width=True, hide_index=True)
 
@@ -267,10 +266,10 @@ if uploaded_file is not None:
                         "Feature": feat, 
                         "Current Limit (2025/12)": spec_str,
                         "Segment Distribution": seg_dist,
-                        "Data-Driven Release Range": f"{int(round(mv - 3*sv))}-{int(round(mv + 3*sv))}",
-                        "Target Goal": int(round(mv)),
-                        f"Tolerance (±{sigma_choice}σ)": int(round(sigma_choice*sv)),
-                        "Mill Range (Proposed)": f"{int(round(mv - sigma_choice*sv))}-{int(round(mv + sigma_choice*sv))}"
+                        "TARGET GOAL": int(round(mv)),
+                        "TOLERANCE": int(round(sv)),
+                        "MILL RANGE 1*SIGMA": f"{int(round(mv - 1*sv))}-{int(round(mv + 1*sv))}",
+                        "RELEASE RANGE 2*SIGMA": f"{int(round(mv - 2*sv))}-{int(round(mv + 2*sv))}"
                     }
                     thick_status.append(row)
                     
@@ -289,12 +288,13 @@ if uploaded_file is not None:
                     v, mv, sv = d['values'], d['mean'], d['std']
                     if len(v) > 1:
                         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 7), gridspec_kw={'height_ratios': [2, 1]})
-                        ucl, lcl = mv + sigma_choice*sv, mv - sigma_choice*sv
+                        
+                        ucl, lcl = mv + 2*sv, mv - 2*sv
                         
                         ax1.plot(v, marker='o', color='#1f77b4', ms=4, lw=1, zorder=1)
                         outs = np.where((v > ucl) | (v < lcl))[0]
                         if len(outs) > 0:
-                            ax1.scatter(outs, v[outs], color='red', s=60, zorder=2, label='Out of Control')
+                            ax1.scatter(outs, v[outs], color='red', s=60, zorder=2, label='Out of Control (2σ)')
                             ax1.legend(loc='upper left', fontsize=8)
                         
                         ax1.axhline(mv, color='green', ls='--', lw=1.5)
@@ -362,7 +362,6 @@ if uploaded_file is not None:
     if st.sidebar.button("Generate OVERALL PDF (Executive)"):
         pdf_ov = FPDF(orientation='L')
         
-        # Trang 1: Summary Data
         pdf_ov.add_page()
         pdf_ov.set_font('Arial', 'B', 16); pdf_ov.cell(0, 10, "QC MECHANICAL PROPERTIES - EXECUTIVE SUMMARY", ln=True, align="C"); pdf_ov.ln(5)
         pdf_ov.set_font('Arial', 'B', 12); pdf_ov.cell(0, 10, "1. Quality Summary", ln=True)
@@ -373,22 +372,23 @@ if uploaded_file is not None:
             for i, v in enumerate(r): pdf_ov.cell(cw[i] if i < len(cw) else 20, 8, clean(v), border=1, align='C')
             pdf_ov.ln()
 
-        # Trang 2: Overall Distribution Charts
         pdf_ov.add_page(); pdf_ov.set_font('Arial', 'B', 12); pdf_ov.cell(0, 10, "2. Factory Overall Distribution", ln=True); ys = pdf_ov.get_y()
         for idx, f in enumerate(['YS', 'TS', 'EL', 'YPE']):
             path = f"overall_{f}.png"
             if os.path.exists(path): pdf_ov.image(path, x=(10 if idx%2==0 else 150), y=(ys if idx<2 else ys+75), w=135)
 
-        # Trang 3: Overall Performance Goals Table
         pdf_ov.add_page(); pdf_ov.set_font('Arial', 'B', 12); pdf_ov.cell(0, 10, "3. Overall Factory Performance Goals", ln=True)
-        heads = ["Feature", "Current Limit (2025/12)", "Segment Dist", "Release Range", "Target", "Tol", "Mill Range"]
-        c_w3 = [20, 40, 65, 35, 15, 20, 40] 
+        
+        # Cập nhật thứ tự tiêu đề và độ rộng cột trong PDF
+        heads = ["Feature", "Current Limit (2025/12)", "Segment Dist", "TARGET GOAL", "TOLERANCE", "MILL RANGE 1*SIGMA", "RELEASE RANGE 2*SIGMA"]
+        c_w3 = [18, 36, 60, 22, 22, 38, 39] 
         pdf_ov.set_font('Arial', 'B', 8)
         for i, h in enumerate(heads): pdf_ov.cell(c_w3[i], 7, clean(h), border=1, align='C')
         pdf_ov.ln(); pdf_ov.set_font('Arial', '', 7)
         
         for row in overall_export_data:
-            v_list = [row["Feature"], row["Current Limit (2025/12)"], row["Segment Distribution"], row["Data-Driven Release Range"], str(row["Target Goal"]), str(row[f"Tolerance (±{sigma_choice}σ)"]), row["Mill Range (Proposed)"]]
+            # Sắp xếp lại danh sách giá trị truyền vào theo đúng thứ tự cột mới
+            v_list = [row["Feature"], row["Current Limit (2025/12)"], row["Segment Distribution"], str(row["TARGET GOAL"]), str(row["TOLERANCE"]), row["MILL RANGE 1*SIGMA"], row["RELEASE RANGE 2*SIGMA"]]
             for i, v in enumerate(v_list): pdf_ov.cell(c_w3[i], 7, clean(v), border=1, align='C')
             pdf_ov.ln()
 
@@ -422,14 +422,17 @@ if uploaded_file is not None:
                 if os.path.exists(path): pdf.image(path, x=(10 if idx%2==0 else 150), y=(ys if idx<2 else ys+75), w=135)
             
             pdf.add_page(); pdf.set_font('Arial', 'B', 12); pdf.cell(0, 10, f"4. Control Limits & Targets - Thickness: {thick}", ln=True)
-            heads = ["Feature", "Current Limit (2025/12)", "Segment Dist", "Release Range", "Target", "Tol", "Mill Range"]
-            c_w3 = [20, 40, 65, 35, 15, 20, 40] 
+            
+            # Cập nhật thứ tự tiêu đề và độ rộng cột trong PDF
+            heads = ["Feature", "Current Limit (2025/12)", "Segment Dist", "TARGET GOAL", "TOLERANCE", "MILL RANGE 1*SIGMA", "RELEASE RANGE 2*SIGMA"]
+            c_w3 = [18, 36, 60, 22, 22, 38, 39] 
             pdf.set_font('Arial', 'B', 8)
             for i, h in enumerate(heads): pdf.cell(c_w3[i], 7, clean(h), border=1, align='C')
             pdf.ln(); pdf.set_font('Arial', '', 7)
             for row in all_export_data:
                 if row['Thickness'] == thick:
-                    v_list = [row["Feature"], row["Current Limit (2025/12)"], row["Segment Distribution"], row["Data-Driven Release Range"], str(row["Target Goal"]), str(row[f"Tolerance (±{sigma_choice}σ)"]), row["Mill Range (Proposed)"]]
+                    # Sắp xếp lại danh sách giá trị truyền vào theo đúng thứ tự cột mới
+                    v_list = [row["Feature"], row["Current Limit (2025/12)"], row["Segment Distribution"], str(row["TARGET GOAL"]), str(row["TOLERANCE"]), row["MILL RANGE 1*SIGMA"], row["RELEASE RANGE 2*SIGMA"]]
                     for i, v in enumerate(v_list): pdf.cell(c_w3[i], 7, clean(v), border=1, align='C')
                     pdf.ln()
             
