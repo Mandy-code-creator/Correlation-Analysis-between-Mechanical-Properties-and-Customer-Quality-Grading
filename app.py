@@ -57,7 +57,7 @@ if uploaded_file is not None:
     with tab1:
         st.header("1. Quality Summary by Thickness")
         summary_df = df.groupby('厚度歸類')[count_cols].sum().reset_index()
-        summary_df['Total Coils'] = summary_df[count_cols].sum(axis=1)
+        summary_df['Total Data'] = summary_df[count_cols].sum(axis=1)
         for col in count_cols:
             summary_df[f"% {col}"] = (summary_df[col] / summary_df['Total Data'] * 100).fillna(0).round(2)
         display_df = summary_df.copy()
