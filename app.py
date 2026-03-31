@@ -61,6 +61,7 @@ if uploaded_file is not None:
         for c in cols_to_int:
             if c in display_df.columns:
                 display_df[c] = display_df[c].astype(int)
+        display_df['No.'] = display_df['No.'].astype(int)
                 
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
@@ -127,14 +128,14 @@ if uploaded_file is not None:
                     fig_ys, ax_ys = plt.subplots(figsize=(10, 5))
                     plot_feature_dist(ax_ys, df_thickness, 'YS', thickness, is_right_col=False) 
                     st.pyplot(fig_ys)
-                    fig_ys.savefig(f"dist_YS_{thickness}.png", bbox_inches='tight') # Lệnh chụp ảnh YS
+                    fig_ys.savefig(f"dist_YS_{thickness}.png", bbox_inches='tight')
 
             if 'TS' in mech_features:
                 with col_ts:
                     fig_ts, ax_ts = plt.subplots(figsize=(10, 5))
                     plot_feature_dist(ax_ts, df_thickness, 'TS', thickness, is_right_col=True)
                     st.pyplot(fig_ts)
-                    fig_ts.savefig(f"dist_TS_{thickness}.png", bbox_inches='tight') # Lệnh chụp ảnh TS
+                    fig_ts.savefig(f"dist_TS_{thickness}.png", bbox_inches='tight')
 
             col_el, col_ype = st.columns(2)
             if 'EL' in mech_features:
@@ -142,17 +143,17 @@ if uploaded_file is not None:
                     fig_el, ax_el = plt.subplots(figsize=(10, 5))
                     plot_feature_dist(ax_el, df_thickness, 'EL', thickness, is_right_col=False)
                     st.pyplot(fig_el)
-                    fig_el.savefig(f"dist_EL_{thickness}.png", bbox_inches='tight') # Lệnh chụp ảnh EL
+                    fig_el.savefig(f"dist_EL_{thickness}.png", bbox_inches='tight')
 
             if 'YPE' in mech_features:
                 with col_ype:
                     fig_ype, ax_ype = plt.subplots(figsize=(10, 5))
                     plot_feature_dist(ax_ype, df_thickness, 'YPE', thickness, is_right_col=True)
                     st.pyplot(fig_ype)
-                    fig_ype.savefig(f"dist_YPE_{thickness}.png", bbox_inches='tight') # Lệnh chụp ảnh YPE
+                    fig_ype.savefig(f"dist_YPE_{thickness}.png", bbox_inches='tight')
             st.markdown("---")
 
-# --- TAB 3: OPTIMIZATION (Data-Driven Executive View) ---
+    # --- TAB 3: OPTIMIZATION (Data-Driven Executive View) ---
     with tab3:
         st.header("3. Production Control Limits & Goals (A-B & Above Focused)")
         
@@ -194,10 +195,15 @@ if uploaded_file is not None:
                     vals_good = temp_calc_good[feat].values
                     wgts_good = temp_calc_good['Good_Count'].values
                     
-                    m_raw = np.average(vals_good, weights=wgts_good)
-                    s_raw = np.sqrt(np.average((vals_good - m_raw)**2, weights=wgts_good))
+                    # --- ROBUST IQR METHOD ---
+                    q1 = np.percentile(vals_good, 25)
+                    q3 = np.percentile(vals_good, 75)
+                    iqr = q3 - q1
                     
-                    mask = (vals_good >= m_raw - 3*s_raw) & (vals_good <= m_raw + 3*s_raw)
+                    lower_fence = q1 - 1.5 * iqr
+                    upper_fence = q3 + 1.5 * iqr
+                    
+                    mask = (vals_good >= lower_fence) & (vals_good <= upper_fence)
                     
                     if mask.sum() > 0:
                         vals_final = vals_good[mask]
@@ -205,7 +211,8 @@ if uploaded_file is not None:
                         mean_val = np.average(vals_final, weights=wgts_final)
                         std_val = np.sqrt(np.average((vals_final - mean_val)**2, weights=wgts_final))
                     else:
-                        mean_val, std_val = m_raw, s_raw
+                        mean_val = np.average(vals_good, weights=wgts_good)
+                        std_val = np.sqrt(np.average((vals_good - mean_val)**2, weights=wgts_good))
                         vals_final = vals_good
                     
                     plot_data_dict[thick][feat] = {
@@ -235,7 +242,7 @@ if uploaded_file is not None:
                 else:
                     seg_dist = "N/A"
 
-                # --- ROW DATA (Đã loại bỏ cột Status) ---
+                # --- ROW DATA ---
                 row_data = {
                     "Feature": feat,
                     "Current Control Limit": spec_str,
@@ -284,7 +291,7 @@ if uploaded_file is not None:
                             
                             fig.tight_layout(pad=3.0)
                             st.pyplot(fig)
-                            fig.savefig(f"imr_{feat}_{thick}.png", bbox_inches='tight') # Lệnh chụp ảnh I-MR
+                            fig.savefig(f"imr_{feat}_{thick}.png", bbox_inches='tight') 
             st.markdown("---")
 
         # --- EXPORT FINAL ---
@@ -295,6 +302,7 @@ if uploaded_file is not None:
             towrite.seek(0)
             st.download_button(label="📥 Download Executive Report (Excel)", data=towrite, 
                                file_name="QC_Mill_Range_Report.xlsx")
+
     # =========================================================================
     # --- XUẤT BÁO CÁO PDF (EXECUTIVE PDF REPORT) ---
     # =========================================================================
@@ -317,7 +325,7 @@ if uploaded_file is not None:
             # ---------------------------------------------------------
             pdf.add_page()
             pdf.set_font('Arial', 'B', 16)
-            pdf.cell(0, 10, "Mechanical Properties & Quality Yield Optimizer", ln=True, align="C")
+            pdf.cell(0, 10, "QC MECHANICAL PROPERTIES & YIELD REPORT", ln=True, align="C")
             pdf.ln(5)
 
             pdf.set_font('Arial', 'B', 12)
@@ -333,6 +341,9 @@ if uploaded_file is not None:
             pdf.set_font('Arial', '', 8)
             for _, row in display_df.iterrows():
                 for i, val in enumerate(row):
+                    # BỘ LỌC CẮT ĐUÔI SỐ THẬP PHÂN
+                    if isinstance(val, (int, float)) and val == int(val):
+                        val = int(val)
                     pdf.cell(col_widths_1[i], 8, clean_text(val), border=1, align='C')
                 pdf.ln()
 
@@ -375,17 +386,7 @@ if uploaded_file is not None:
                 pdf.cell(0, 10, f"Thickness: {thick}", ln=True)
                 
                 pdf.set_font('Arial', 'B', 8)
-                headers = ["Feature", "Standard", "Segment Distribution", "Release Range", "Target", f"Tol(+/-{sigma_choice})", "Mill Range"]
-                col_widths_3 = [22, 23, 75, 32, 15, 20, 33, 20] 
-                
-                for i, head in enumerate(headers):
-                    pdf.cell(col_widths_3[i], 8, head, border=1, align='C')
-                pdf.ln()
-                
-                pdf.set_font('Arial', 'B', 8)
-                # Đã xóa "Status" khỏi danh sách Header
                 headers = ["Feature", "Current Limit", "Segment Distribution", "Release Range", "Target", f"Tol(+/-{sigma_choice})", "Mill Range"]
-                # Chia lại độ rộng cho 7 cột (Tổng = 240)
                 col_widths_3 = [25, 25, 80, 35, 15, 20, 40] 
                 
                 for i, head in enumerate(headers):
@@ -396,7 +397,6 @@ if uploaded_file is not None:
                 for row in all_export_data:
                     if row['Thickness'] == thick:
                         pdf.cell(col_widths_3[0], 8, clean_text(row.get("Feature", "")), border=1, align='C')
-                        # Đã sửa thành tên chuẩn "Current Control Limit" để gọi đúng dữ liệu
                         pdf.cell(col_widths_3[1], 8, clean_text(row.get("Current Control Limit", "")), border=1, align='C')
                         pdf.cell(col_widths_3[2], 8, clean_text(row.get("Segment Distribution", "")), border=1, align='C')
                         pdf.cell(col_widths_3[3], 8, clean_text(row.get("Data-Driven Release Range", "")), border=1, align='C')
@@ -404,7 +404,6 @@ if uploaded_file is not None:
                         tol_key = f"Tolerance (±{sigma_choice}σ)"
                         pdf.cell(col_widths_3[5], 8, clean_text(row.get(tol_key, "")), border=1, align='C')
                         pdf.cell(col_widths_3[6], 8, clean_text(row.get("Mill Range (Proposed)", "")), border=1, align='C')
-                        # Dòng in Status ở cuối cùng đã bị xóa hoàn toàn
                         pdf.ln()
                 
                 pdf.ln(5)
@@ -417,13 +416,13 @@ if uploaded_file is not None:
             # ---------------------------------------------------------
             # LƯU VÀ TẢI PDF
             # ---------------------------------------------------------
-            pdf.output("Mechanical Properties & Quality Yield Optimizer.pdf")
-            with open("Mechanical Properties & Quality Yield Optimizer.pdf", "rb") as f:
+            pdf.output("Mechanical_Properties_Optimizer.pdf")
+            with open("Mechanical_Properties_Optimizer.pdf", "rb") as f:
                 pdf_bytes = f.read()
                 
             st.download_button(
                 label="📥 Download PDF Report",
                 data=pdf_bytes,
-                file_name="Mechanical Properties & Quality Yield Optimizer.pdf",
+                file_name="Mechanical_Properties_Optimizer_Report.pdf",
                 mime="application/pdf"
             )
