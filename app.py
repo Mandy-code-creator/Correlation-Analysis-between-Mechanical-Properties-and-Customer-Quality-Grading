@@ -23,8 +23,9 @@ if uploaded_file is not None:
     df = pd.read_excel(uploaded_file)
     df.columns = df.columns.str.strip() 
 
-    # Khởi tạo biến toàn cục cho Export để tránh NameError
+    # Khởi tạo biến toàn cục cho Export
     all_export_data = []
+    overall_export_data = [] # <--- THÊM BIẾN LƯU DỮ LIỆU OVERALL
     
     # --- 2. DATA PREPROCESSING ---
     count_cols = ['A-B+數', 'A-B數', 'A-B-數', 'B+數', 'B數']
@@ -42,7 +43,7 @@ if uploaded_file is not None:
 
     thickness_list = sorted(df['厚度歸類'].dropna().unique(), key=lambda x: float(x))
 
-    # --- TÍNH TOÁN KHUNG TRỤC X CỐ ĐỊNH (GLOBAL X-AXIS) ---
+    # --- TÍNH TOÁN KHUNG TRỤC X CỐ ĐỊNH ---
     global_x_bounds = {}
     for feat in mech_features:
         vd = df[[feat] + count_cols].dropna(subset=[feat]).copy()
@@ -59,7 +60,7 @@ if uploaded_file is not None:
             buf = (fmax - fmin) * 0.05 if (fmax - fmin) > 0 else 5
             global_x_bounds[feat] = (fmin - buf, fmax + buf)
 
-    # --- HÀM TÍNH TOÁN THANG ĐO Y CHUNG ---
+    # --- HÀM TÍNH TOÁN THANG ĐO Y ---
     def get_shared_y(data, features):
         max_y = 0
         for feat in features:
@@ -107,11 +108,8 @@ if uploaded_file is not None:
         def plot_qc_dist(ax, data, feat, title, custom_y_limit, is_right=False):
             k_b = 15 
             color_map = {
-                'A-B+數': '#2ca02c', # Green
-                'A-B數': '#1f77b4',  # Blue
-                'A-B-數': '#ff7f0e', # Orange
-                'B+數': '#9467bd',   # Purple
-                'B數': '#d62728'     # Red
+                'A-B+數': '#2ca02c', 'A-B數': '#1f77b4', 'A-B-數': '#ff7f0e', 
+                'B+數': '#9467bd', 'B數': '#d62728'
             }
             mean_inf = []
             
@@ -143,7 +141,6 @@ if uploaded_file is not None:
                         bin_w = (f_max - f_min) / k_b
                         ax.plot(x_r, stats.norm.pdf(x_r, m, s) * wgts.sum() * bin_w, color=color, lw=2, zorder=4)
 
-            # Matplotlib Stacked Hist 
             if vals_list:
                 ax.hist(vals_list, bins=bins_arr, weights=wgts_list, color=colors_list, 
                         stacked=True, edgecolor='white', alpha=0.8, zorder=2)
@@ -208,7 +205,6 @@ if uploaded_file is not None:
 
         # 1. OVERALL FACTORY
         st.subheader("🌐 Overall Factory Performance Goals")
-        overall_status = []
         total_n_overall = df[count_cols].sum().sum()
         seg_dist_overall = "N/A" if total_n_overall == 0 else ", ".join([f"{k.replace('數','')}:{int(round(df[k].sum()/total_n_overall*100))}%" for k in count_cols])
 
@@ -226,7 +222,7 @@ if uploaded_file is not None:
                     m_ov = np.average(v, weights=w)
                     s_ov = np.sqrt(np.average((v - m_ov)**2, weights=w))
                     
-                    overall_status.append({
+                    overall_export_data.append({
                         "Feature": feat, 
                         "Current Limit (2025/12)": spec_str_ov, 
                         "Segment Distribution": seg_dist_overall,
@@ -235,7 +231,7 @@ if uploaded_file is not None:
                         f"Tolerance (±{sigma_choice}σ)": int(round(sigma_choice*s_ov)),
                         "Mill Range (Proposed)": f"{int(round(m_ov - sigma_choice*s_ov))}-{int(round(m_ov + sigma_choice*s_ov))}"
                     })
-        st.dataframe(pd.DataFrame(overall_status), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(overall_export_data), use_container_width=True, hide_index=True)
 
         st.markdown("---")
         
@@ -356,15 +352,56 @@ if uploaded_file is not None:
         towrite.seek(0)
         st.sidebar.download_button(label="Click to Download Excel", data=towrite, file_name="QC_Optimization_Report.xlsx")
 
-    # --- PDF EXPORT ---
-    st.markdown("### 🖨️ Export PDF Executive Report")
+    # --- PDF EXPORT SECTION ---
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🖨️ PDF Reports")
+    
     def clean(t): return str(t).replace('±', '+/-').replace('–', '-').encode('latin-1', 'ignore').decode('latin-1')
 
-    if st.button("Generate & Download PDF"):
+    # NÚT XUẤT BÁO CÁO TỔNG QUAN (OVERALL ONLY)
+    if st.sidebar.button("Generate OVERALL PDF (Executive)"):
+        pdf_ov = FPDF(orientation='L')
+        
+        # Trang 1: Summary Data
+        pdf_ov.add_page()
+        pdf_ov.set_font('Arial', 'B', 16); pdf_ov.cell(0, 10, "QC MECHANICAL PROPERTIES - EXECUTIVE SUMMARY", ln=True, align="C"); pdf_ov.ln(5)
+        pdf_ov.set_font('Arial', 'B', 12); pdf_ov.cell(0, 10, "1. Quality Summary", ln=True)
+        pdf_ov.set_font('Arial', 'B', 8); cw = [10, 20] + [15]*len(count_cols) + [20] + [15]*len(count_cols)
+        for i, col in enumerate(display_df.columns): pdf_ov.cell(cw[i] if i < len(cw) else 20, 8, clean(col), border=1, align='C')
+        pdf_ov.ln(); pdf_ov.set_font('Arial', '', 8)
+        for _, r in display_df.iterrows():
+            for i, v in enumerate(r): pdf_ov.cell(cw[i] if i < len(cw) else 20, 8, clean(v), border=1, align='C')
+            pdf_ov.ln()
+
+        # Trang 2: Overall Distribution Charts
+        pdf_ov.add_page(); pdf_ov.set_font('Arial', 'B', 12); pdf_ov.cell(0, 10, "2. Factory Overall Distribution", ln=True); ys = pdf_ov.get_y()
+        for idx, f in enumerate(['YS', 'TS', 'EL', 'YPE']):
+            path = f"overall_{f}.png"
+            if os.path.exists(path): pdf_ov.image(path, x=(10 if idx%2==0 else 150), y=(ys if idx<2 else ys+75), w=135)
+
+        # Trang 3: Overall Performance Goals Table
+        pdf_ov.add_page(); pdf_ov.set_font('Arial', 'B', 12); pdf_ov.cell(0, 10, "3. Overall Factory Performance Goals", ln=True)
+        heads = ["Feature", "Current Limit (2025/12)", "Segment Dist", "Release Range", "Target", "Tol", "Mill Range"]
+        c_w3 = [20, 40, 65, 35, 15, 20, 40] 
+        pdf_ov.set_font('Arial', 'B', 8)
+        for i, h in enumerate(heads): pdf_ov.cell(c_w3[i], 7, clean(h), border=1, align='C')
+        pdf_ov.ln(); pdf_ov.set_font('Arial', '', 7)
+        
+        for row in overall_export_data:
+            v_list = [row["Feature"], row["Current Limit (2025/12)"], row["Segment Distribution"], row["Data-Driven Release Range"], str(row["Target Goal"]), str(row[f"Tolerance (±{sigma_choice}σ)"]), row["Mill Range (Proposed)"]]
+            for i, v in enumerate(v_list): pdf_ov.cell(c_w3[i], 7, clean(v), border=1, align='C')
+            pdf_ov.ln()
+
+        pdf_ov.output("QC_Overall_Report.pdf")
+        with open("QC_Overall_Report.pdf", "rb") as f:
+            st.sidebar.download_button("📥 Download OVERALL PDF", f.read(), "QC_Overall_Report.pdf", "application/pdf")
+
+    # NÚT XUẤT BÁO CÁO ĐẦY ĐỦ (FULL DETAILED)
+    if st.sidebar.button("Generate FULL PDF (Detailed)"):
         pdf = FPDF(orientation='L')
         
         pdf.add_page()
-        pdf.set_font('Arial', 'B', 16); pdf.cell(0, 10, "QC MECHANICAL PROPERTIES REPORT", ln=True, align="C"); pdf.ln(5)
+        pdf.set_font('Arial', 'B', 16); pdf.cell(0, 10, "QC MECHANICAL PROPERTIES - FULL REPORT", ln=True, align="C"); pdf.ln(5)
         pdf.set_font('Arial', 'B', 12); pdf.cell(0, 10, "1. Quality Summary", ln=True)
         pdf.set_font('Arial', 'B', 8); cw = [10, 20] + [15]*len(count_cols) + [20] + [15]*len(count_cols)
         for i, col in enumerate(display_df.columns): pdf.cell(cw[i] if i < len(cw) else 20, 8, clean(col), border=1, align='C')
@@ -386,13 +423,13 @@ if uploaded_file is not None:
             
             pdf.add_page(); pdf.set_font('Arial', 'B', 12); pdf.cell(0, 10, f"4. Control Limits & Targets - Thickness: {thick}", ln=True)
             heads = ["Feature", "Current Limit (2025/12)", "Segment Dist", "Release Range", "Target", "Tol", "Mill Range"]
-            c_w3 = [20, 36, 74, 35, 15, 20, 40] 
+            c_w3 = [20, 40, 65, 35, 15, 20, 40] 
             pdf.set_font('Arial', 'B', 8)
             for i, h in enumerate(heads): pdf.cell(c_w3[i], 7, clean(h), border=1, align='C')
             pdf.ln(); pdf.set_font('Arial', '', 7)
             for row in all_export_data:
                 if row['Thickness'] == thick:
-                    v_list = [row["Feature"], row["Current Limit (2025/12)"], row["Segment Distribution"], row["Data-Driven Release Range"], row["Target Goal"], row[f"Tolerance (±{sigma_choice}σ)"], row["Mill Range (Proposed)"]]
+                    v_list = [row["Feature"], row["Current Limit (2025/12)"], row["Segment Distribution"], row["Data-Driven Release Range"], str(row["Target Goal"]), str(row[f"Tolerance (±{sigma_choice}σ)"]), row["Mill Range (Proposed)"]]
                     for i, v in enumerate(v_list): pdf.cell(c_w3[i], 7, clean(v), border=1, align='C')
                     pdf.ln()
             
@@ -403,6 +440,6 @@ if uploaded_file is not None:
                 if os.path.exists(path): 
                     pdf.image(path, x=(10 if idx%2==0 else 150), y=(y_imr if idx<2 else y_imr+90), w=130)
 
-        pdf.output("QC_Report.pdf")
-        with open("QC_Report.pdf", "rb") as f:
-            st.download_button("📥 Download Final PDF", f.read(), "QC_Report.pdf", "application/pdf")
+        pdf.output("QC_Full_Report.pdf")
+        with open("QC_Full_Report.pdf", "rb") as f:
+            st.sidebar.download_button("📥 Download FULL PDF", f.read(), "QC_Full_Report.pdf", "application/pdf")
