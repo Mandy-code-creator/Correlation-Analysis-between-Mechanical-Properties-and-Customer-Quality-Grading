@@ -49,7 +49,6 @@ if uploaded_file is not None:
         summary_df['Total Coils'] = summary_df[count_cols].sum(axis=1)
         
         for col in count_cols:
-            # GIỮ LẠI 2 CHỮ SỐ THẬP PHÂN THEO YÊU CẦU
             summary_df[f"% {col}"] = (summary_df[col] / summary_df['Total Coils'] * 100).fillna(0).round(2)
             
         display_df = summary_df.copy()
@@ -164,38 +163,61 @@ if uploaded_file is not None:
                 
                 low, high = spec_limits.get(feat, (None, None))
 
-                # --- CALCULATE MILL RANGE, RELEASE RANGE, TARGET GOAL ---
+                # --- CALCULATE MILL RANGE & TARGET GOAL ---
+                prac_low, prac_high = None, None
+                
                 if low is not None and high is not None:
                     release_range = f"{int(low)}–{int(high)}"
                     theo_low = low + 0.05*(high-low)
                     theo_high = high - 0.05*(high-low)
                     
-                    # Mill Range logic: Intersection of Safe Spec and Capability
                     prac_low = max(theo_low, LCL_I)
                     prac_high = min(theo_high, UCL_I)
                     
                     if prac_low > prac_high: prac_low, prac_high = theo_low, theo_high
-                        
                     mill_range = f"{int(round(prac_low))}–{int(round(prac_high))}"
-                    target_goal = int(round((prac_low + prac_high) / 2))
                     
                 elif low is not None:
                     release_range = f">={int(low)}"
                     theo_low = low + 0.05*low
                     prac_low = max(theo_low, LCL_I)
                     mill_range = f">={int(round(prac_low))}"
-                    target_goal = int(round(prac_low + 5)) # Đề xuất nhích thêm 5 đơn vị
                 else:
                     release_range = "N/A"
                     mill_range = "N/A"
-                    target_goal = "N/A"
 
+                # --- NEW TARGET GOAL LOGIC (BASED ONLY ON A-B+ & A-B) ---
+                temp_target = df_t[[feat, 'A-B+數', 'A-B數']].dropna(subset=[feat])
+                weights = temp_target['A-B+數'] + temp_target['A-B數']
+                
+                if weights.sum() > 0:
+                    # Tính trung bình trọng số dựa trên số lượng hàng A-B và A-B+
+                    target_goal = int(round(np.average(temp_target[feat], weights=weights)))
+                else:
+                    # Fallback dự phòng nếu không có cuộn nào đạt A-B hay A-B+
+                    if prac_low is not None and prac_high is not None:
+                        target_goal = int(round((prac_low + prac_high) / 2))
+                    elif prac_low is not None:
+                        target_goal = int(round(prac_low + 5))
+                    else:
+                        target_goal = "N/A"
+
+                # --- KHÔI PHỤC LẠI SEGMENT DISTRIBUTION ---
                 seg_A_Bplusplus = df_t['A+B+數'].sum()
                 seg_A_Bplus = df_t['A-B+數'].sum()
-                seg_total = df_t[count_cols].sum().sum()
+                seg_A_B = df_t['A-B數'].sum()
+                seg_A_Bminus = df_t['A-B-數'].sum()
+                seg_Bplus = df_t['B+數'].sum()
+                seg_total = seg_A_Bplusplus + seg_A_Bplus + seg_A_B + seg_A_Bminus + seg_Bplus
 
                 if seg_total > 0:
-                    seg_dist = (f"A-B+ & Above: {int(round((seg_A_Bplusplus+seg_A_Bplus)/seg_total*100))}%")
+                    seg_dist = (
+                        f"A+B+: {int(round(seg_A_Bplusplus/seg_total*100))}%, "
+                        f"A-B+: {int(round(seg_A_Bplus/seg_total*100))}%, "
+                        f"A-B: {int(round(seg_A_B/seg_total*100))}%, "
+                        f"A-B-: {int(round(seg_A_Bminus/seg_total*100))}%, "
+                        f"B+: {int(round(seg_Bplus/seg_total*100))}%"
+                    )
                 else:
                     seg_dist = "N/A"
 
@@ -203,7 +225,7 @@ if uploaded_file is not None:
                     "Thickness": thick,
                     "Feature": feat,
                     "Release Range (Spec)": release_range,
-                    "Segment Yield (A-B+)": seg_dist,
+                    "Segment Distribution": seg_dist,
                     "Target Goal": target_goal,
                     "Mill Range (Proposed)": mill_range,
                     "Current Capability (I-MR)": f"{int(round(LCL_I))}–{int(round(UCL_I))}",
@@ -239,7 +261,6 @@ if uploaded_file is not None:
                     ax2.set_title("Moving Range Chart")
                     ax2.legend(loc='upper right', fontsize=8)
                     
-                    # GIÃN CÁCH BIỂU ĐỒ TRÁNH ĐÈ TIÊU ĐỀ
                     fig.tight_layout(pad=3.0)
                     st.pyplot(fig)
             st.markdown("---")
