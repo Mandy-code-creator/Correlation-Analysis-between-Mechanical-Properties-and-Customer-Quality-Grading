@@ -151,7 +151,7 @@ if uploaded_file is not None:
     # --- TAB 3: SAFE WINDOW OPTIMIZATION & EXPORT ---
     with tab3:
         st.header("3. Safe Operating Window by Thickness (with I-MR & Export)")
-        sigma_factor = st.radio("Select Sigma Factor", [2.0, 2.5, 3.0], index=0)
+        sigma_factor = st.radio("Select Sigma Factor", [1.0,2.0, 2.5, 3.0], index=0)
 
         spec_limits = {
             "YS": (405, 500), "TS": (415, 550), "EL": (25, None), "YPE": (4, None)
