@@ -178,9 +178,14 @@ if uploaded_file is not None:
                 temp_calc_good = temp_calc[temp_calc['Good_Count'] > 0]
 
                 low, high = spec_limits.get(feat, (None, None))
-                spec_str = f"{int(low)}–{int(high)}" if low and high else (f">={int(low)}" if low else "N/A")
+                if low is not None and high is not None:
+                    spec_str = f"{int(low)}–{int(high)}"
+                elif low is not None:
+                    spec_str = f">={int(low)}"
+                else:
+                    spec_str = "N/A"
 
-# --- CALCULATE DATA-DRIVEN LIMITS (ĐỒNG BỘ 100% VỚI BIỂU ĐỒ) ---
+                # --- CALCULATE DATA-DRIVEN LIMITS ---
                 if not temp_calc_good.empty:
                     vals_good = temp_calc_good[feat].values
                     wgts_good = temp_calc_good['Good_Count'].values
@@ -189,7 +194,7 @@ if uploaded_file is not None:
                     m_raw = np.average(vals_good, weights=wgts_good)
                     s_raw = np.sqrt(np.average((vals_good - m_raw)**2, weights=wgts_good))
                     
-                    # Bước 2: Lọc nhiễu Outliers (3-Sigma) - Đây là chìa khóa để khớp con số 426
+                    # Bước 2: Lọc nhiễu Outliers (3-Sigma)
                     mask = (vals_good >= m_raw - 3*s_raw) & (vals_good <= m_raw + 3*s_raw)
                     
                     if mask.sum() > 0:
@@ -199,12 +204,15 @@ if uploaded_file is not None:
                         mean_val = np.average(vals_final, weights=wgts_final)
                         std_val = np.sqrt(np.average((vals_final - mean_val)**2, weights=wgts_final))
                     else:
-                        # Nếu không lọc được gì thì dùng dữ liệu gốc
                         mean_val, std_val = m_raw, s_raw
                         vals_final = vals_good
                     
-                    # QUAN TRỌNG: Gán dữ liệu đã lọc vào biểu đồ để đồng bộ 100%
-                    plot_data_dict[thick][feat] = vals_final
+                    # QUAN TRỌNG: Lưu thành dạng Dictionary để bên dưới gọi d['values'] không bị lỗi
+                    plot_data_dict[thick][feat] = {
+                        'values': vals_final,
+                        'mean': mean_val,
+                        'std': std_val
+                    }
                     
                     target_goal = int(round(mean_val))
                     
@@ -213,7 +221,7 @@ if uploaded_file is not None:
                     rel_high = mean_val + 3 * std_val
                     release_range = f"{int(round(rel_low))}–{int(round(rel_high))}"
                     
-                    # 3. MILL RANGE (PROPOSED) (Dải vận hành dựa trên Mean sạch)
+                    # 3. MILL RANGE (PROPOSED) 
                     mill_low = mean_val - sigma_choice * std_val
                     mill_high = mean_val + sigma_choice * std_val
                     mill_range = f"{int(round(mill_low))}–{int(round(mill_high))}"
@@ -222,9 +230,9 @@ if uploaded_file is not None:
                     tolerance_val = int(round(sigma_choice * std_val))
                 else:
                     target_goal, release_range, mill_range, tolerance_val = "N/A", "N/A", "N/A", "N/A"
-                    mean_val = 0 
+                    mean_val, std_val = 0, 0  # Bổ sung std_val = 0 để tránh lỗi UnboundLocalError
 
-                # --- SEGMENT DISTRIBUTION (Giữ nguyên phần thống kê tỷ lệ) ---
+                # --- SEGMENT DISTRIBUTION ---
                 seg_total = df_t[count_cols].sum().sum()
                 if seg_total > 0:
                     seg_dist = ", ".join([f"{k.replace('數','')}: {int(round(df_t[k].sum()/seg_total*100))}%" for k in count_cols])
@@ -234,7 +242,7 @@ if uploaded_file is not None:
                 # --- ROW DATA ---
                 row_data = {
                     "Feature": feat,
-                    "Internal Standard": spec_str,
+                    "Customer Spec Limit": spec_str,
                     "Segment Distribution": seg_dist,
                     "Data-Driven Release Range": release_range,
                     "Target Goal": target_goal,
@@ -254,38 +262,40 @@ if uploaded_file is not None:
             if status_list:
                 st.dataframe(pd.DataFrame(status_list), use_container_width=True, hide_index=True)
 
-            
-# --- VẼ BIỂU ĐỒ I-MR (Lấy đúng dữ liệu đã lưu) ---
+            # --- VẼ BIỂU ĐỒ I-MR ---
             for feat in mech_features:
                 if feat in plot_data_dict[thick]:
-                    # Lấy đúng dữ liệu của Feat hiện tại từ Dictionary
                     d = plot_data_dict[thick][feat]
-                    v = d['values']
-                    m_v = d['mean']
-                    s_v = d['std']
                     
-                    if len(v) > 1:
-                        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 7))
-                        U, L = m_v + sigma_choice*s_v, m_v - sigma_choice*s_v
+                    # CHỐT CHẶN AN TOÀN: Kiểm tra d có phải Dictionary không
+                    if isinstance(d, dict) and 'values' in d:
+                        v = d['values']
+                        m_v = d['mean']
+                        s_v = d['std']
                         
-                        # Individuals Chart
-                        ax1.plot(v, marker='o', color='blue', markersize=4)
-                        ax1.axhline(m_v, color='green', ls='--', label=f'Mean: {int(round(m_v))}')
-                        ax1.axhline(U, color='red', ls='--', label=f'UCL: {int(round(U))}')
-                        ax1.axhline(L, color='red', ls='--', label=f'LCL: {int(round(L))}')
-                        ax1.set_title(f"Individuals Chart: {feat} (Unified Data) - Thick {thick}")
-                        ax1.legend(loc='upper right', fontsize=8)
-                        
-                        # Moving Range Chart
-                        MR = np.abs(np.diff(v))
-                        ax2.plot(MR, marker='o', color='orange', markersize=4)
-                        ax2.axhline(np.mean(MR), color='green', ls='--', label=f'MR Mean: {int(round(np.mean(MR)))}')
-                        ax2.set_title("Moving Range Chart")
-                        ax2.legend(loc='upper right', fontsize=8)
-                        
-                        fig.tight_layout(pad=3.0)
-                        st.pyplot(fig)
+                        if len(v) > 1:
+                            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 7))
+                            U, L = m_v + sigma_choice*s_v, m_v - sigma_choice*s_v
+                            
+                            # Individuals Chart
+                            ax1.plot(v, marker='o', color='blue', markersize=4)
+                            ax1.axhline(m_v, color='green', ls='--', label=f'Mean: {int(round(m_v))}')
+                            ax1.axhline(U, color='red', ls='--', label=f'UCL: {int(round(U))}')
+                            ax1.axhline(L, color='red', ls='--', label=f'LCL: {int(round(L))}')
+                            ax1.set_title(f"Individuals Chart: {feat} (Unified Data) - Thick {thick}")
+                            ax1.legend(loc='upper right', fontsize=8)
+                            
+                            # Moving Range Chart
+                            MR = np.abs(np.diff(v))
+                            ax2.plot(MR, marker='o', color='orange', markersize=4)
+                            ax2.axhline(np.mean(MR), color='green', ls='--', label=f'MR Mean: {int(round(np.mean(MR)))}')
+                            ax2.set_title("Moving Range Chart")
+                            ax2.legend(loc='upper right', fontsize=8)
+                            
+                            fig.tight_layout(pad=3.0)
+                            st.pyplot(fig)
             st.markdown("---")
+
         # --- EXPORT FINAL ---
         if all_export_data:
             st.markdown("### 📥 Download Final QC Report")
