@@ -68,7 +68,7 @@ if uploaded_file is not None:
             display_df[c] = display_df[c].astype(int)
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-   # --- TAB 2: DISTRIBUTION (PROFESSIONAL QC STYLE) ---
+   # --- TAB 2: DISTRIBUTION (FIXED NAMEERROR & PROFESSIONAL STYLE) ---
     with tab2:
         st.header("2. Mechanical Properties Distribution Analysis")
         
@@ -85,7 +85,7 @@ if uploaded_file is not None:
             color_map = {'A-B+數': '#1f77b4', 'A-B數': '#ff7f0e', 'A-B-數': '#9467bd', 'B+數': '#d62728', 'B數': '#7f7f7f'}
             mean_inf = []
             
-            # Add subtle dotted grid (as seen in your image)
+            # Add subtle dotted grid
             ax.grid(axis='y', linestyle=':', alpha=0.6, zorder=0)
             
             # 2. Plotting Histogram & Normal Curve
@@ -111,19 +111,19 @@ if uploaded_file is not None:
                     # Normal Distribution Curve
                     if len(vals) > 2 and s > 0:
                         x_r = np.linspace(vals.min() - 5, vals.max() + 5, 100)
-                        bin_w = (vals.max() - vals.min()) / k_b if vals.max() != vals_d.min() else 1
+                        # ĐÃ SỬA LỖI TẠI ĐÂY: vals.min() thay vì vals_d.min()
+                        bin_w = (vals.max() - vals.min()) / k_b if vals.max() != vals.min() else 1
                         ax.plot(x_r, stats.norm.pdf(x_r, m, s) * wgts.sum() * bin_w, color=color, lw=2, zorder=4)
 
             # 3. Smart Scaling
             y_limit = global_y_ov if is_overall else data[count_cols].sum(axis=1).max() * 1.3
             ax.set_ylim(0, y_limit if y_limit > 0 else 100)
 
-            # 4. Precise Staggered Labels (Matches your Image)
+            # 4. Precise Staggered Labels (4 Levels)
             if mean_inf:
                 mean_inf.sort(key=lambda x: x['val'])
-                # Start labels near the top and step down
                 y_max = ax.get_ylim()[1]
-                levels = [0.90, 0.82, 0.74, 0.66, 0.58]
+                levels = [0.90, 0.82, 0.74, 0.66]
                 
                 for i, info in enumerate(mean_inf):
                     y_pos = y_max * levels[i % len(levels)]
@@ -135,22 +135,21 @@ if uploaded_file is not None:
             # 5. Title & Labels Formatting
             ax.set_title(f"{feat} (Thick: {title})", fontsize=12, fontweight='bold', pad=10)
             ax.set_ylabel("Count", fontsize=10)
-            ax.set_xlabel("") # Keep X-axis clean
             
-            # Professional Legend on the right
+            # Professional Legend
             if is_right:
                 ax.legend(title="Grade", title_fontsize='10', fontsize='9', 
                           bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0.)
 
-        # --- Tab Drawing Logic (Overall & Detailed) ---
+        # --- Tab Drawing Logic ---
         st.subheader("🌐 Factory Overall Distribution")
         ov_cols = st.columns(2)
         for idx, feat in enumerate(['YS', 'TS', 'EL', 'YPE']):
             if feat in mech_features:
                 with ov_cols[idx % 2]:
-                    fig, ax = plt.subplots(figsize=(10, 5))
-                    plot_qc_dist(ax, df, feat, "Overall", is_overall=True, is_right=(idx % 2 != 0))
-                    st.pyplot(fig)
+                    fig_ov, ax_ov = plt.subplots(figsize=(10, 5))
+                    plot_qc_dist(ax_ov, df, feat, "Overall", is_overall=True, is_right=(idx % 2 != 0))
+                    st.pyplot(fig_ov)
 
         st.markdown("---")
         st.subheader("🔍 Thickness Detailed Analysis")
