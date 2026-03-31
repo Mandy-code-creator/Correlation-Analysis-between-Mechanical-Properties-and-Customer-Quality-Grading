@@ -255,23 +255,28 @@ if uploaded_file is not None:
                 st.dataframe(pd.DataFrame(status_list), use_container_width=True, hide_index=True)
 
             
-            # --- I-MR Charts ---
+# --- VẼ BIỂU ĐỒ I-MR (Lấy đúng dữ liệu đã lưu) ---
             for feat in mech_features:
                 if feat in plot_data_dict[thick]:
-                    v = plot_data_dict[thick][feat] 
+                    # Lấy đúng dữ liệu của Feat hiện tại từ Dictionary
+                    d = plot_data_dict[thick][feat]
+                    v = d['values']
+                    m_v = d['mean']
+                    s_v = d['std']
+                    
                     if len(v) > 1:
                         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 7))
-                        m_v = mean_val   # lấy weighted mean đã tính ở trên
-                        s_v = std_val    # lấy std_val đã tính ở trên
                         U, L = m_v + sigma_choice*s_v, m_v - sigma_choice*s_v
                         
+                        # Individuals Chart
                         ax1.plot(v, marker='o', color='blue', markersize=4)
                         ax1.axhline(m_v, color='green', ls='--', label=f'Mean: {int(round(m_v))}')
                         ax1.axhline(U, color='red', ls='--', label=f'UCL: {int(round(U))}')
                         ax1.axhline(L, color='red', ls='--', label=f'LCL: {int(round(L))}')
-                        ax1.set_title(f"Individuals Chart (A-B & Above Only): {feat} - Thick {thick}")
+                        ax1.set_title(f"Individuals Chart: {feat} (Unified Data) - Thick {thick}")
                         ax1.legend(loc='upper right', fontsize=8)
                         
+                        # Moving Range Chart
                         MR = np.abs(np.diff(v))
                         ax2.plot(MR, marker='o', color='orange', markersize=4)
                         ax2.axhline(np.mean(MR), color='green', ls='--', label=f'MR Mean: {int(round(np.mean(MR)))}')
@@ -281,7 +286,6 @@ if uploaded_file is not None:
                         fig.tight_layout(pad=3.0)
                         st.pyplot(fig)
             st.markdown("---")
-
         # --- EXPORT FINAL ---
         if all_export_data:
             st.markdown("### 📥 Download Final QC Report")
