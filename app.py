@@ -160,7 +160,7 @@ if uploaded_file is not None:
                 low, high = spec_limits.get(feat, (None, None))
                 spec_str = f"{int(low)}–{int(high)}" if low and high else (f">={int(low)}" if low else "N/A")
 
-            # --- CALCULATE DATA-DRIVEN LIMITS ---
+# --- CALCULATE DATA-DRIVEN LIMITS ---
                 if not temp_calc_good.empty:
                     vals_good = temp_calc_good[feat].values
                     wgts_good = temp_calc_good['Good_Count'].values
@@ -187,54 +187,41 @@ if uploaded_file is not None:
                     rel_high = min(rel_high_raw, high) if high is not None else rel_high_raw
                     release_range = f"{int(round(rel_low))}–{int(round(rel_high))}" if high is not None else f">={int(round(rel_low))}"
                     
-                    # 3. Mill Range (Tighter operational control)
-                    mill_low_raw = mean_val - sigma_factor * std_val
-                    mill_high_raw = mean_val + sigma_factor * std_val
+                    # 3. Mill Range (Dùng sigma_choice đã khai báo ở st.radio)
+                    mill_low_raw = mean_val - sigma_choice * std_val
+                    mill_high_raw = mean_val + sigma_choice * std_val
                     mill_low = max(mill_low_raw, rel_low)
                     mill_high = min(mill_high_raw, rel_high)
                     mill_range = f"{int(round(mill_low))}–{int(round(mill_high))}" if high is not None else f">={int(round(mill_low))}"
 
-                    # 4. THÊM VÀO: Tính toán giá trị Tolerance thực tế (Biên độ dao động cho phép)
-                    tolerance_val = int(round(sigma_factor * std_val))
+                    # 4. Tính toán giá trị Tolerance thực tế
+                    tolerance_val = int(round(sigma_choice * std_val))
 
                 else:
                     target_goal = "N/A"
                     release_range = "N/A"
                     mill_range = "N/A"
-                    tolerance_val = "N/A" # Thêm N/A nếu không có dữ liệu
+                    tolerance_val = "N/A"
                     mean_val = 0
                     std_val = 0
 
-                # --- SEGMENT DISTRIBUTION ---
-                seg_A_Bplusplus = df_t['A+B+數'].sum()
-                seg_A_Bplus = df_t['A-B+數'].sum()
-                seg_A_B = df_t['A-B數'].sum()
-                seg_A_Bminus = df_t['A-B-數'].sum()
-                seg_Bplus = df_t['B+數'].sum()
-                seg_total = seg_A_Bplusplus + seg_A_Bplus + seg_A_B + seg_A_Bminus + seg_Bplus
-
+                # --- SEGMENT DISTRIBUTION (Giữ nguyên 5 cấp độ) ---
+                seg_total = df_t[count_cols].sum().sum()
                 if seg_total > 0:
-                    seg_dist = (
-                        f"A+B+: {int(round(seg_A_Bplusplus/seg_total*100))}%, "
-                        f"A-B+: {int(round(seg_A_Bplus/seg_total*100))}%, "
-                        f"A-B: {int(round(seg_A_B/seg_total*100))}%, "
-                        f"A-B-: {int(round(seg_A_Bminus/seg_total*100))}%, "
-                        f"B+: {int(round(seg_Bplus/seg_total*100))}%"
-                    )
+                    seg_dist = ", ".join([f"{k.replace('數','')}: {int(round(df_t[k].sum()/seg_total*100))}%" for k in count_cols])
                 else:
                     seg_dist = "N/A"
 
-                # --- CẬP NHẬT TRÌNH TỰ BẢNG THEO YÊU CẦU MỚI ---
+                # --- ROW DATA (Đảm bảo sigma_choice đã tồn tại) ---
                 row_data = {
                     "Feature": feat,
                     "Customer Spec Limit": spec_str,
                     "Segment Distribution": seg_dist,
                     "Data-Driven Release Range": release_range,
                     "Target Goal": target_goal,
-                    # Thêm cột Tolerance với tiêu đề động chứa giá trị Sigma Factor (2.0, 2.5...)
-                    f"Tolerance (±{sigma_choice}σ)": tolerance_val, 
+                    f"Tolerance (±{sigma_choice}σ)": tolerance_val, # Dòng gây lỗi đã được sửa tên biến
                     "Mill Range (Proposed)": mill_range,
-                    "Status": "✅ Safe" if (low is None or (mean_val - sigma_factor*std_val) >= low) else "⚠ Risk"
+                    "Status": "✅ Safe" if (low is None or (mean_val - sigma_choice*std_val) >= low) else "⚠ Risk"
                 }
                 
                 status_list.append(row_data)
