@@ -106,11 +106,19 @@ if uploaded_file is not None:
                         fig.savefig(f"dist_{feat}_{thickness}.png", bbox_inches='tight')
             st.markdown("---")
 
-    # --- TAB 3: OPTIMIZATION ---
+    # --- TAB 3: OPTIMIZATION (Executive View - Based on A-B & Above) ---
     with tab3:
-        st.header("3. Production Control Limits (Based on A-B+ Data)")
-        sigma_choice = st.radio("Select Sigma Factor", [2.0, 2.5, 3.0], index=0)
-        spec_limits = {"YS": (405, 500), "TS": (415, 550), "EL": (25, None), "YPE": (4, None)}
+        st.header("3. Production Control Limits & Goals (A-B & Above Focused)")
+        
+        # Lựa chọn hệ số Sigma để tính dải an toàn (Mill Range)
+        sigma_choice = st.radio("Select Sigma Factor for Mill Safety Zone", [2.0, 2.5, 3.0], index=0)
+
+        # Thiết lập giới hạn kiểm soát hiện tại (Current Control Limit)
+        spec_limits = {
+            "YS": (405, 500), "TS": (415, 550), "EL": (25, None), "YPE": (4, None)
+        }
+
+        thickness_list = sorted(df['厚度歸類'].dropna().unique(), key=str)
         all_export_data = []
         plot_data_dict = {}
 
@@ -120,76 +128,118 @@ if uploaded_file is not None:
             plot_data_dict[thick] = {}
             status_list = []
             
-            # CHỈ LẤY GRADE A-B+數 ĐỂ TÍNH TOÁN TARGET
-            target_grade = 'A-B+數' if 'A-B+數' in df_t.columns else None
+            # XÁC ĐỊNH NHÓM HÀNG TỐT (A-B TRỞ LÊN)
+            good_grade_cols = [c for c in ['A-B+數', 'A-B數'] if c in df_t.columns]
 
             for feat in mech_features:
-                if target_grade:
-                    temp_calc = df_t[[feat, target_grade]].dropna(subset=[feat])
-                    temp_calc = temp_calc[temp_calc[target_grade] > 0]
+                # 1. Lọc dữ liệu: Chỉ lấy những hàng có đặc tính cơ lý VÀ có số lượng hàng tốt > 0
+                if good_grade_cols:
+                    temp_calc = df_t[[feat] + good_grade_cols].dropna(subset=[feat])
+                    temp_calc['Total_Good_Qty'] = temp_calc[good_grade_cols].sum(axis=1)
+                    temp_calc = temp_calc[temp_calc['Total_Good_Qty'] > 0]
                 else:
                     temp_calc = pd.DataFrame()
 
+                # Lấy chuỗi hiển thị giới hạn (ví dụ: 405-500)
                 low, high = spec_limits.get(feat, (None, None))
                 spec_str = f"{int(low)}–{int(high)}" if low and high else (f">={int(low)}" if low else "N/A")
 
                 if not temp_calc.empty:
-                    vals_raw, wgts_raw = temp_calc[feat].values, temp_calc[target_grade].values
+                    vals_raw = temp_calc[feat].values
+                    wgts_raw = temp_calc['Total_Good_Qty'].values
+                    
+                    # 2. THUẬT TOÁN IQR (Gọt nhiễu để dải số hợp lý hơn)
                     q1, q3 = np.percentile(vals_raw, 25), np.percentile(vals_raw, 75)
                     iqr = q3 - q1
                     mask = (vals_raw >= q1 - 1.5*iqr) & (vals_raw <= q3 + 1.5*iqr)
+                    
                     v_f = vals_raw[mask] if mask.sum() > 0 else vals_raw
                     w_f = wgts_raw[mask] if mask.sum() > 0 else wgts_raw
                     
-                    m_val = np.average(v_f, weights=w_f)
-                    s_val = np.sqrt(np.average((v_f - m_val)**2, weights=w_f))
-                    plot_data_dict[thick][feat] = {'values': v_f, 'mean': m_val, 'std': s_val}
+                    # 3. TÍNH TOÁN CÁC CHỈ SỐ THỐNG KÊ (CÓ TRỌNG SỐ)
+                    mean_val = np.average(v_f, weights=w_f)
+                    std_val = np.sqrt(np.average((v_f - mean_val)**2, weights=w_f))
                     
-                    t_goal = int(round(m_val))
-                    rel_range = f"{int(round(m_val - 3*s_val))}–{int(round(m_val + 3*s_val))}"
-                    m_range = f"{int(round(m_val - sigma_choice*s_val))}–{int(round(m_val + sigma_choice*s_val))}"
-                    tol_val = int(round(sigma_choice * s_val))
+                    plot_data_dict[thick][feat] = {'values': v_f, 'mean': mean_val, 'std': std_val}
+                    
+                    target_goal = int(round(mean_val))
+                    release_range = f"{int(round(mean_val - 3*std_val))}–{int(round(mean_val + 3*std_val))}"
+                    mill_range = f"{int(round(mean_val - sigma_choice*std_val))}–{int(round(mean_val + sigma_choice*std_val))}"
+                    tolerance_val = int(round(sigma_choice * std_val))
                 else:
-                    t_goal, rel_range, m_range, tol_val, m_val, s_val = "N/A", "N/A", "N/A", "N/A", 0, 0
+                    target_goal, release_range, mill_range, tolerance_val = "N/A", "N/A", "N/A", "N/A"
+                    mean_val, std_val = 0, 0 
 
-                total_n = df_t[count_cols].sum().sum()
-                seg_dist = ", ".join([f"{k.replace('數','')}:{int(round(df_t[k].sum()/total_n*100))}%" for k in count_cols]) if total_n > 0 else "N/A"
+                # Tính toán phân bổ phần trăm các cấp độ (Segment Distribution)
+                seg_total = df_t[count_cols].sum().sum()
+                seg_dist = ", ".join([f"{k.replace('數','')}:{int(round(df_t[k].sum()/seg_total*100))}%" for k in count_cols]) if seg_total > 0 else "N/A"
 
-                row = {"Feature": feat, "Current Control Limit": spec_str, "Segment Distribution": seg_dist,
-                       "Data-Driven Release Range": rel_range, "Target Goal": t_goal,
-                       f"Tolerance (±{sigma_choice}σ)": tol_val, "Mill Range (Proposed)": m_range}
-                status_list.append(row)
-                export_row = row.copy(); export_row['Thickness'] = thick
+                # 4. TỔNG HỢP DỮ LIỆU DÒNG (ĐÃ BỎ STATUS)
+                row_data = {
+                    "Feature": feat,
+                    "Current Control Limit": spec_str,
+                    "Segment Distribution": seg_dist,
+                    "Data-Driven Release Range": release_range,
+                    "Target Goal": target_goal,
+                    f"Tolerance (±{sigma_choice}σ)": tolerance_val, 
+                    "Mill Range (Proposed)": mill_range
+                }
+                
+                status_list.append(row_data)
+                export_row = row_data.copy()
+                export_row['Thickness'] = thick
                 all_export_data.append(export_row)
 
-            st.dataframe(pd.DataFrame(status_list), use_container_width=True, hide_index=True)
+            # Hiển thị bảng số liệu tối ưu
+            if status_list:
+                st.dataframe(pd.DataFrame(status_list), use_container_width=True, hide_index=True)
 
-            # I-MR Charts
-            top_4 = [f for f in ['YS', 'TS', 'EL', 'YPE'] if f in plot_data_dict[thick]]
+            # --- 5. VẼ BIỂU ĐỒ I-MR (DÀN TRANG 2x2 TRÊN WEB) ---
+            top_4_feats = [f for f in ['YS', 'TS', 'EL', 'YPE'] if f in plot_data_dict[thick]]
             cols_imr = st.columns(2)
-            for idx, feat in enumerate(top_4):
+            
+            for idx, feat in enumerate(top_4_feats):
                 with cols_imr[idx % 2]:
                     d = plot_data_dict[thick][feat]
-                    v, mv, sv = d['values'], d['mean'], d['std']
+                    v, m_v, s_v = d['values'], d['mean'], d['std']
+                    
                     if len(v) > 1:
-                        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 6))
-                        ucl, lcl = mv + sigma_choice*sv, mv - sigma_choice*sv
-                        ax1.plot(v, marker='o', color='blue', ms=3, lw=1)
-                        outs = np.where((v > ucl) | (v < lcl))[0]
-                        ax1.scatter(outs, v[outs], color='red', s=30, zorder=3)
-                        ax1.axhline(mv, color='green', ls='--'); ax1.axhline(ucl, color='red', ls='--'); ax1.axhline(lcl, color='red', ls='--')
-                        ax1.set_title(f"I-Chart: {feat}")
-                        mr = np.abs(np.diff(v))
-                        mrm, mru = np.mean(mr), 3.267 * np.mean(mr)
-                        ax2.plot(mr, marker='o', color='orange', ms=3, lw=1)
-                        mrouts = np.where(mr > mru)[0]
-                        ax2.scatter(mrouts, mr[mrouts], color='red', s=30, zorder=3)
-                        ax2.axhline(mrm, color='green', ls='--'); ax2.axhline(mru, color='red', ls='--')
-                        ax2.set_title("MR-Chart")
-                        fig.tight_layout(); st.pyplot(fig)
+                        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 7))
+                        U, L = m_v + sigma_choice*s_v, m_v - sigma_choice*s_v
+                        
+                        # Individuals Chart + Tô đỏ Outliers
+                        ax1.plot(v, marker='o', color='blue', markersize=3, lw=1, zorder=1)
+                        out_idx = np.where((v > U) | (v < L))[0]
+                        ax1.scatter(out_idx, v[out_idx], color='red', s=30, zorder=2)
+                        ax1.axhline(m_v, color='green', ls='--', label=f'Mean: {target_goal}')
+                        ax1.axhline(U, color='red', ls='--', label=f'UCL: {int(round(U))}')
+                        ax1.axhline(L, color='red', ls='--', label=f'LCL: {int(round(L))}')
+                        ax1.set_title(f"I-Chart: {feat} (Thick: {thick})")
+                        ax1.legend(loc='upper right', fontsize=7)
+                        
+                        # Moving Range Chart + Tô đỏ Outliers
+                        MR = np.abs(np.diff(v))
+                        MR_m = np.mean(MR)
+                        MR_U = 3.267 * MR_m
+                        ax2.plot(MR, marker='o', color='orange', markersize=3, lw=1, zorder=1)
+                        mr_out = np.where(MR > MR_U)[0]
+                        ax2.scatter(mr_out, MR[mr_out], color='red', s=30, zorder=2)
+                        ax2.axhline(MR_m, color='green', ls='--')
+                        ax2.axhline(MR_U, color='red', ls='--')
+                        ax2.set_title("Moving Range Chart")
+                        
+                        fig.tight_layout()
+                        st.pyplot(fig)
                         fig.savefig(f"imr_{feat}_{thick}.png", bbox_inches='tight')
             st.markdown("---")
 
+        # Nút tải Excel (Dữ liệu đã gộp A-B trở lên)
+        if all_export_data:
+            st.markdown("### 📥 Download Final QC Report (Excel)")
+            towrite = io.BytesIO()
+            pd.DataFrame(all_export_data).to_excel(towrite, index=False, engine='openpyxl')
+            towrite.seek(0)
+            st.download_button(label="📥 Download Excel Report", data=towrite, file_name="QC_Mill_Range_Report.xlsx")
     # --- PDF EXPORT ---
     st.markdown("### 🖨️ Export PDF Executive Report")
     def clean(t): return str(t).replace('±', '+/-').replace('–', '-').encode('latin-1', 'ignore').decode('latin-1')
