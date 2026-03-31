@@ -68,116 +68,128 @@ if uploaded_file is not None:
                 display_df[c] = display_df[c].astype(int)
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-    # --- TAB 2: DISTRIBUTION (SMART AUTO SCALING & HIGH-CONTRAST COLORS) ---
+    # --- HÀM TÍNH TOÁN THANG ĐO CHUNG (CHÍNH XÁC 100%) ---
+    def get_shared_y(data, features):
+        max_y = 0
+        for feat in features:
+            if feat in data.columns:
+                vd = data.dropna(subset=[feat])
+                if not vd.empty:
+                    f_min, f_max = vd[feat].min(), vd[feat].max()
+                    if f_min < f_max:
+                        # Chia chính xác 15 cột để đồng bộ với histplot
+                        bins = np.linspace(f_min, f_max, 16) 
+                        for c in count_cols:
+                            wd = vd[vd[c] > 0]
+                            if not wd.empty:
+                                cnts, _ = np.histogram(wd[feat], bins=bins, weights=wd[c])
+                                max_y = max(max_y, cnts.max())
+        return max_y * 1.4 if max_y > 0 else 50 # Nới trần 40% để đặt nhãn
+
+    # --- TAB 2: DISTRIBUTION (CHUẨN XÁC & HIGH-CONTRAST) ---
     with tab2:
         st.header("2. Mechanical Properties Distribution Analysis")
-        
-        # Calculate Global Max for Overall section only
-        max_counts_ov = []
-        for f in ['YS', 'TS', 'EL', 'YPE']:
-            if f in df.columns:
-                temp_total = df[count_cols].sum(axis=1)
-                max_counts_ov.append(temp_total.max())
-        global_y_ov = max(max_counts_ov) * 1.3 if max_counts_ov else 600
 
-        def plot_standard_dist(ax, data, feat, title_suffix, is_overall=False, is_right_col=False):
-            # 1. Setup
-            N_t = data['Total_Count'].sum()
+        def plot_qc_dist(ax, data, feat, title, custom_y_limit, is_right=False):
             k_b = 15 
-            
-            # --- CẬP NHẬT: BẢNG MÀU HIGH-CONTRAST CỰC KỲ DỄ PHÂN BIỆT ---
+            # Bảng màu tương phản cao, dễ nhìn, không nhầm lẫn
             color_map = {
-                'A-B+數': '#2ca02c', # Green (Tốt nhất)
-                'A-B數': '#1f77b4',  # Blue (Tốt)
-                'A-B-數': '#ff7f0e', # Orange (Trung bình)
-                'B+數': '#9467bd',   # Purple (Hơi tệ)
-                'B數': '#d62728'    # Red (Cảnh báo - Rớt cấp)
+                'A-B+數': '#2ca02c', # Xanh lá (Tốt nhất)
+                'A-B數': '#1f77b4',  # Xanh dương
+                'A-B-數': '#ff7f0e', # Cam
+                'B+數': '#9467bd',   # Tím
+                'B數': '#d62728'     # Đỏ (Nguy hiểm)
             }
             mean_inf = []
             
-            # Add subtle dotted grid
             ax.grid(axis='y', linestyle=':', alpha=0.6, zorder=0)
             
-            # 2. Vẽ từng Grade
+            # Đồng bộ khung Bin cho toàn bộ các lớp dữ liệu
+            vd = data.dropna(subset=[feat])
+            if vd.empty: return
+            f_min, f_max = vd[feat].min(), vd[feat].max()
+            if f_min == f_max: return
+            bins_arr = np.linspace(f_min, f_max, k_b + 1)
+            
+            # Vẽ dữ liệu
             for col_n in count_cols:
                 temp_d = data[[feat, col_n]].dropna()
                 temp_d = temp_d[temp_d[col_n] > 0]
                 if not temp_d.empty:
-                    vals_d, wgts_d = temp_d[feat].values, temp_d[col_n].values
+                    vals, wgts = temp_d[feat].values, temp_d[col_n].values
                     color = color_map.get(col_n, '#7f7f7f')
                     
-                    # Vẽ Histogram
-                    sns.histplot(x=vals_d, weights=wgts_d, label=col_n.replace('數',''), 
-                                 color=color, bins=k_b, stat='count', alpha=0.4, ax=ax, edgecolor='white', zorder=2)
+                    # Histogram sử dụng bins_arr khóa cứng
+                    sns.histplot(x=vals, weights=wgts, bins=bins_arr, color=color, 
+                                 stat='count', alpha=0.4, ax=ax, edgecolor='white', zorder=2)
                     
-                    # Tính Weighted Mean
-                    m_d = np.average(vals_d, weights=wgts_d)
-                    s_d = np.sqrt(np.average((vals_d - m_d)**2, weights=wgts_d))
+                    m = np.average(vals, weights=wgts)
+                    s = np.sqrt(np.average((vals - m)**2, weights=wgts))
                     
-                    # Vẽ đường kẻ Mean và lưu thông tin nhãn
-                    ax.axvline(m_d, color=color, ls='--', lw=1.5, zorder=3)
-                    mean_inf.append({'val': m_d, 'color': color})
+                    ax.axvline(m, color=color, ls='--', lw=1.5, zorder=3)
+                    mean_inf.append({'val': m, 'color': color})
 
-                    # Vẽ đường cong chuẩn
-                    if len(vals_d) > 2 and s_d > 0:
-                        x_range = np.linspace(vals_d.min() - 5, vals_d.max() + 5, 100)
-                        bin_w = (vals_d.max() - vals_d.min()) / k_b if vals_d.max() != vals_d.min() else 1
-                        ax.plot(x_range, stats.norm.pdf(x_range, m_d, s_d) * wgts_d.sum() * bin_w, color=color, lw=2, zorder=4)
+                    # Đường cong phân phối chuẩn bám sát Histogram
+                    if len(vals) > 2 and s > 0:
+                        x_r = np.linspace(f_min - (f_max-f_min)*0.1, f_max + (f_max-f_min)*0.1, 100)
+                        bin_w = (f_max - f_min) / k_b
+                        ax.plot(x_r, stats.norm.pdf(x_r, m, s) * wgts.sum() * bin_w, color=color, lw=2, zorder=4)
 
-            # --- SMART SCALING FIX: Ép thang Y tự động cho từng biểu đồ ---
-            if is_overall:
-                current_limit = global_y_ov # Giữ thang đo lớn cho Overall
-            else:
-                # Tự tính local max cho độ dày và feature này, nới hờ 35% cho nhãn số
-                local_max = data[count_cols].sum(axis=1).max()
-                current_limit = local_max * 1.35 if local_max > 0 else 100
-            
-            ax.set_ylim(0, current_limit)
+            # Cân xứng biểu đồ tuyệt đối
+            ax.set_ylim(0, custom_y_limit)
 
-            # Hiển thị nhãn giá trị Mean so le
+            # Vẽ nhãn so le gọn gàng
             if mean_inf:
                 mean_inf.sort(key=lambda x: x['val'])
-                y_max = ax.get_ylim()[1]
-                levels = [0.90, 0.82, 0.74, 0.66] # Tránh đè nhãn
-                
+                levels = [0.90, 0.82, 0.74, 0.66, 0.58]
                 for i, info in enumerate(mean_inf):
-                    y_p = y_max * levels[i % len(levels)]
-                    ax.text(info['val'], y_p, f"{int(round(info['val']))}", color=info['color'], 
-                            fontsize=9, fontweight='bold', ha='center', va='center', zorder=5,
+                    y_pos = custom_y_limit * levels[i % len(levels)]
+                    ax.text(info['val'], y_pos, f"{int(round(info['val']))}", 
+                            color=info['color'], fontsize=9, fontweight='bold',
+                            ha='center', va='center', zorder=5,
                             bbox=dict(facecolor='white', alpha=0.9, edgecolor=info['color'], boxstyle='round,pad=0.3'))
 
-            ax.set_title(f"{feat} (Thick: {title_suffix})", fontsize=12, fontweight='bold', pad=10)
+            ax.set_title(f"{feat} (Thick: {title})", fontsize=12, fontweight='bold', pad=10)
             ax.set_ylabel("Count", fontsize=10)
+            ax.set_xlabel("")
             
-            # Format Legend cho chuyên nghiệp
-            if is_right_col:
-                ax.legend(title="Grade", title_fontsize='10', fontsize='9', 
+            # Ép Legend hiển thị đủ 5 cấp
+            if is_right:
+                legend_elements = [Patch(facecolor=color_map[k], edgecolor='white', label=k.replace('數',''), alpha=0.5) for k in color_map]
+                ax.legend(handles=legend_elements, title="Grade", title_fontsize='10', fontsize='9', 
                           bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0.)
 
-        # --- PHẦN VẼ (Hàm vẽ giữ nguyên) ---
-        st.subheader("🌐 Factory Overall Distribution (Standard Combined View)")
+        # 1. Vẽ Overall
+        st.subheader("🌐 Factory Overall Distribution")
+        overall_y = get_shared_y(df, ['YS', 'TS', 'EL', 'YPE'])
         ov_cols = st.columns(2)
         for idx, feat in enumerate(['YS', 'TS', 'EL', 'YPE']):
             if feat in mech_features:
                 with ov_cols[idx % 2]:
                     fig_ov, ax_ov = plt.subplots(figsize=(10, 5))
-                    # Pass True for Overall scaling
-                    plot_standard_dist(ax_ov, df, feat, "Overall", is_overall=True, is_right_col=(idx % 2 != 0))
+                    plot_qc_dist(ax_ov, df, feat, "Overall", custom_y_limit=overall_y, is_right=(idx % 2 != 0))
                     st.pyplot(fig_ov)
+                    fig_ov.savefig(f"overall_{feat}.png", bbox_inches='tight')
 
         st.markdown("---")
-        st.subheader("🔍 Detailed Distribution per Thickness Category")
+        
+        # 2. Vẽ chi tiết từng độ dày
+        st.subheader("🔍 Thickness Detailed Analysis")
         for thick in thickness_list:
             df_thick = df[df['厚度歸類'] == thick]
             st.markdown(f"### 📏 Category: **{thick}**")
+            
+            # Tính Y chung cho riêng độ dày này
+            local_y = get_shared_y(df_thick, ['YS', 'TS', 'EL', 'YPE']) 
+            
             cols_dist = st.columns(2)
             for idx, feat in enumerate(['YS', 'TS', 'EL', 'YPE']):
                 if feat in mech_features:
                     with cols_dist[idx % 2]:
                         fig, ax = plt.subplots(figsize=(10, 5))
-                        # Pass False to enable Smart Auto-scaling for each chart
-                        plot_standard_dist(ax, df_thick, feat, thick, is_overall=False, is_right_col=(idx % 2 != 0))
+                        plot_qc_dist(ax, df_thick, feat, thick, custom_y_limit=local_y, is_right=(idx % 2 != 0))
                         st.pyplot(fig)
+                        fig.savefig(f"dist_{feat}_{thick}.png", bbox_inches='tight')
             st.markdown("---")
 
     # --- TAB 3: OPTIMIZATION & I-MR CHARTS ---
