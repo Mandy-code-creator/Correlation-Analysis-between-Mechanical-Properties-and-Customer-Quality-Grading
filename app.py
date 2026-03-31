@@ -317,7 +317,7 @@ if uploaded_file is not None:
             # ---------------------------------------------------------
             pdf.add_page()
             pdf.set_font('Arial', 'B', 16)
-            pdf.cell(0, 10, "QC MECHANICAL PROPERTIES & YIELD REPORT", ln=True, align="C")
+            pdf.cell(0, 10, "Mechanical Properties & Quality Yield Optimizer", ln=True, align="C")
             pdf.ln(5)
 
             pdf.set_font('Arial', 'B', 12)
@@ -375,7 +375,7 @@ if uploaded_file is not None:
                 pdf.cell(0, 10, f"Thickness: {thick}", ln=True)
                 
                 pdf.set_font('Arial', 'B', 8)
-                headers = ["Feature", "Standard", "Segment Distribution", "Release Range", "Target", f"Tol(+/-{sigma_choice})", "Mill Range", "Status"]
+                headers = ["Feature", "Standard", "Segment Distribution", "Release Range", "Target", f"Tol(+/-{sigma_choice})", "Mill Range"]
                 col_widths_3 = [22, 23, 75, 32, 15, 20, 33, 20] 
                 
                 for i, head in enumerate(headers):
@@ -393,7 +393,7 @@ if uploaded_file is not None:
                         tol_key = f"Tolerance (±{sigma_choice}σ)"
                         pdf.cell(col_widths_3[5], 8, clean_text(row.get(tol_key, "")), border=1, align='C')
                         pdf.cell(col_widths_3[6], 8, clean_text(row.get("Mill Range (Proposed)", "")), border=1, align='C')
-                        pdf.cell(col_widths_3[7], 8, clean_text(row.get("Status", "")), border=1, align='C')
+                        
                         pdf.ln()
                 
                 pdf.ln(5)
