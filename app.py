@@ -294,7 +294,7 @@ if uploaded_file is not None:
         towrite.seek(0)
         st.sidebar.download_button(label="Click to Download Excel", data=towrite, file_name="QC_Optimization_Report.xlsx")
 
-    # --- PDF EXPORT (PHỤC HỒI CODE IN BIỂU ĐỒ) ---
+    # --- PDF EXPORT (ĐÃ FIX LỖI BỊ CẮT XÉN BIỂU ĐỒ I-MR) ---
     st.markdown("### 🖨️ Export PDF Executive Report")
     def clean(t): return str(t).replace('±', '+/-').replace('–', '-').encode('latin-1', 'ignore').decode('latin-1')
 
@@ -318,29 +318,35 @@ if uploaded_file is not None:
             path = f"overall_{f}.png"
             if os.path.exists(path): pdf.image(path, x=(10 if idx%2==0 else 150), y=(ys if idx<2 else ys+75), w=135)
 
-        # Các trang chi tiết: Distribution và I-MR cho từng loại độ dày
+        # CÁC TRANG CHI TIẾT TỪNG ĐỘ DÀY
         for thick in thickness_list:
-            # Distribution PDF
+            # Trang PDF: Distribution
             pdf.add_page(); pdf.set_font('Arial', 'B', 12); pdf.cell(0, 10, f"3. Distribution Analysis - Thickness: {thick}", ln=True); ys = pdf.get_y()
             for idx, f in enumerate(['YS', 'TS', 'EL', 'YPE']):
                 path = f"dist_{f}_{thick}.png"
                 if os.path.exists(path): pdf.image(path, x=(10 if idx%2==0 else 150), y=(ys if idx<2 else ys+75), w=135)
             
-            # Control Limits & I-MR PDF
-            pdf.add_page(); pdf.set_font('Arial', 'B', 12); pdf.cell(0, 10, f"4. Control Limits & Trending - Thickness: {thick}", ln=True)
-            heads = ["Feature", "Current Limit", "Segment Dist", "Release Range", "Target", "Tol", "Mill Range"]; c_w3 = [25, 25, 80, 35, 15, 20, 40]
+            # Trang PDF: Bảng Control Limits
+            pdf.add_page(); pdf.set_font('Arial', 'B', 12); pdf.cell(0, 10, f"4. Control Limits & Targets - Thickness: {thick}", ln=True)
+            heads = ["Feature", "Current Control Limit(2025/12)", "Segment Dist", "Release Range", "Target", "Tol", "Mill Range"]; c_w3 = [25, 25, 80, 35, 15, 20, 40]
             pdf.set_font('Arial', 'B', 8)
             for i, h in enumerate(heads): pdf.cell(c_w3[i], 7, clean(h), border=1, align='C')
             pdf.ln(); pdf.set_font('Arial', '', 7)
             for row in all_export_data:
                 if row['Thickness'] == thick:
-                    v_list = [row["Feature"], row["Current Control Limit"], row["Segment Distribution"], row["Data-Driven Release Range"], row["Target Goal"], row[f"Tolerance (±{sigma_choice}σ)"], row["Mill Range (Proposed)"]]
+                    v_list = [row["Feature"], row["Current Control Limit(2025/12)"], row["Segment Distribution"], row["Data-Driven Release Range"], row["Target Goal"], row[f"Tolerance (±{sigma_choice}σ)"], row["Mill Range (Proposed)"]]
                     for i, v in enumerate(v_list): pdf.cell(c_w3[i], 7, clean(v), border=1, align='C')
                     pdf.ln()
-            yt = pdf.get_y() + 5
+            
+            # TẠO TRANG MỚI HOÀN TOÀN CHO I-MR ĐỂ TRÁNH CẮT XÉN
+            pdf.add_page(); pdf.set_font('Arial', 'B', 12); pdf.cell(0, 10, f"5. I-MR Control Charts - Thickness: {thick}", ln=True)
+            y_imr = pdf.get_y() + 2 # Lấy tọa độ Y bắt đầu của trang mới
+            
             for idx, f in enumerate(['YS', 'TS', 'EL', 'YPE']):
                 path = f"imr_{f}_{thick}.png"
-                if os.path.exists(path): pdf.image(path, x=(10 if idx%2==0 else 150), y=(yt if idx<2 else yt+75), w=135)
+                if os.path.exists(path): 
+                    # Set width = 130 và khoảng cách Y giữa 2 hàng = 90 để lọt hoàn hảo vào khung A4 ngang
+                    pdf.image(path, x=(10 if idx%2==0 else 150), y=(y_imr if idx<2 else y_imr+90), w=130)
 
         pdf.output("QC_Report.pdf")
         with open("QC_Report.pdf", "rb") as f:
