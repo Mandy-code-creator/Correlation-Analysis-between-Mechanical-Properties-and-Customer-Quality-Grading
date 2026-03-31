@@ -70,7 +70,6 @@ if uploaded_file is not None:
     with tab2:
         st.header("2. Distribution Analysis (Parallel Clear View)")
         grade_mapping = {'A+B+': 'A+B+數', 'A-B+': 'A-B+數', 'A-B': 'A-B數', 'A-B-': 'A-B-數', 'B+': 'B+數'}
-        # Cấu hình màu sắc tương phản rõ ràng
         colors = ['#2ca02c', '#1f77b4', '#ff7f0e', '#9467bd', '#d62728'] 
         thickness_list = sorted(df['厚度歸類'].dropna().unique(), key=str)
 
@@ -86,7 +85,6 @@ if uploaded_file is not None:
                 if len(temp_d) > 2:
                     vals_d, wgts_d = temp_d[feat].values, temp_d[col_n].values
                     
-                    # Biểu đồ cột alpha 0.45 và viền trắng giúp màu đậm đà, dễ phân biệt
                     sns.histplot(x=vals_d, weights=wgts_d, label=label, color=color, bins=k_b, 
                                  stat='count', alpha=0.45, ax=ax, edgecolor='white', linewidth=0.5)
                     
@@ -248,16 +246,40 @@ if uploaded_file is not None:
                     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 6))
                     m_v, s_v = np.mean(v), np.std(v, ddof=1)
                     U, L = m_v + sigma_factor*s_v, m_v - sigma_factor*s_v
+                    
+                    # Làm tròn số nguyên cho chú thích
+                    m_v_int = int(round(m_v))
+                    U_int = int(round(U))
+                    L_int = int(round(L))
+
                     ax1.plot(v, marker='o', color='blue')
-                    ax1.axhline(m_v, color='green', ls='--', label='Mean')
-                    ax1.axhline(U, color='red', ls='--', label='UCL')
-                    ax1.axhline(L, color='red', ls='--', label='LCL')
+                    # Gắn giá trị cụ thể vào nhãn
+                    ax1.axhline(m_v, color='green', ls='--', label=f'Mean: {m_v_int}')
+                    ax1.axhline(U, color='red', ls='--', label=f'UCL (Max): {U_int}')
+                    ax1.axhline(L, color='red', ls='--', label=f'LCL (Min): {L_int}')
+                    
                     ax1.set_title(f"Individuals Chart for {feat}")
-                    ax1.legend()
+                    ax1.legend(loc='upper right')
+                    
                     MR = np.abs(np.diff(v))
+                    MR_mean = np.mean(MR)
+                    d3, d4 = 0, 3.267
+                    UCL_MR = d4 * MR_mean
+                    LCL_MR = d3 * MR_mean
+                    
+                    MR_mean_int = int(round(MR_mean))
+                    UCL_MR_int = int(round(UCL_MR))
+                    LCL_MR_int = int(round(LCL_MR))
+                    
                     ax2.plot(MR, marker='o', color='orange')
-                    ax2.axhline(np.mean(MR), color='green', ls='--')
-                    ax2.set_title("Moving Range Chart")
+                    # Gắn giá trị cụ thể vào nhãn biểu đồ MR
+                    ax2.axhline(MR_mean, color='green', ls='--', label=f'MR Mean: {MR_mean_int}')
+                    ax2.axhline(UCL_MR, color='red', ls='--', label=f'UCL MR: {UCL_MR_int}')
+                    ax2.axhline(LCL_MR, color='red', ls='--', label=f'LCL MR: {LCL_MR_int}')
+                    
+                    ax2.set_title(f"Moving Range Chart for {feat}")
+                    ax2.legend(loc='upper right')
+                    
                     st.pyplot(fig)
             st.markdown("---")
 
