@@ -64,13 +64,58 @@ if uploaded_file is not None:
                 
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-    # --- TAB 2: DISTRIBUTION ---
+    # --- TAB 2: DISTRIBUTION (CẬP NHẬT: SO SÁNH TỔNG HỢP + CHI TIẾT) ---
     with tab2:
-        st.header("2. Distribution Analysis (A-B+ vs Others)")
+        st.header("2. Mechanical Properties Distribution Analysis")
+        
+        # Lấy danh sách độ dày và sắp xếp theo số để vẽ biểu đồ so sánh
+        thickness_list = sorted(df['厚度歸類'].dropna().unique(), key=lambda x: float(x))
+        
+        # ---------------------------------------------------------
+        # PHẦN 1: BIỂU ĐỒ SO SÁNH TỔNG HỢP (0.5 ~ 0.8 TRÊN CÙNG 1 HÌNH)
+        # ---------------------------------------------------------
+        st.subheader("📌 Cross-Thickness Comparison (Combined View)")
+        st.info("Biểu đồ dưới đây giúp so sánh xu hướng cơ lý giữa các độ dày khác nhau.")
+        
+        comp_cols = st.columns(2)
+        # Vẽ 4 đặc tính quan trọng nhất
+        for idx, feat in enumerate(['YS', 'TS', 'EL', 'YPE']):
+            if feat in mech_features:
+                with comp_cols[idx % 2]:
+                    fig_comp, ax_comp = plt.subplots(figsize=(10, 6))
+                    
+                    # Vẽ đường cong phân phối (KDE) cho từng độ dày
+                    for thick in thickness_list:
+                        df_thick = df[df['厚 độ 歸類'] == thick].dropna(subset=[feat])
+                        if not df_thick.empty:
+                            vals = df_thick[feat].values
+                            # Trọng số là tổng tất cả các cuộn (A-B+, A-B, A-B-, B+, B)
+                            weights = df_thick[count_cols].sum(axis=1).values
+                            
+                            if weights.sum() > 0:
+                                sns.kdeplot(x=vals, weights=weights, label=f"Thick {thick}", 
+                                            ax=ax_comp, fill=True, alpha=0.1, linewidth=2)
+                    
+                    ax_comp.set_title(f"Comparison: {feat} across Thicknesses", fontsize=12, fontweight='bold')
+                    ax_comp.set_xlabel(feat)
+                    ax_comp.set_ylabel("Density (Mật độ)")
+                    ax_comp.legend(title="Thickness")
+                    ax_comp.grid(axis='y', linestyle='--', alpha=0.3)
+                    
+                    st.pyplot(fig_comp)
+                    # Lưu ảnh để xuất PDF (Trang so sánh tổng hợp)
+                    fig_comp.savefig(f"compare_{feat}.png", bbox_inches='tight')
+
+        st.markdown("---")
+
+        # ---------------------------------------------------------
+        # PHẦN 2: CHI TIẾT TỪNG ĐỘ DÀY (GIỮ NGUYÊN LOGIC CŨ CỦA MANDY)
+        # ---------------------------------------------------------
+        st.subheader("🔍 Detailed Distribution per Thickness Category")
         color_map = {'A-B+數': '#2ca02c', 'A-B-數': '#ff7f0e', 'B+數': '#d62728', 'B數': '#9467bd', 'A-B數': '#1f77b4'}
-        thickness_list = sorted(df['厚度歸類'].dropna().unique(), key=str)
 
         def plot_feature_dist(ax, data, feat, thick, is_right_col=False):
+            # Tính toán số bin dựa trên tổng số lượng cuộn thực tế
             N_t = data['Total_Count'].sum()
             k_b = max(int(1 + 3.322 * math.log10(N_t)) if N_t > 0 else 10, 5)
             
@@ -80,8 +125,10 @@ if uploaded_file is not None:
                 if len(temp_d) >= 1:
                     vals_d, wgts_d = temp_d[feat].values, temp_d[col_n].values
                     color = color_map.get(col_n, '#7f7f7f')
+                    
                     sns.histplot(x=vals_d, weights=wgts_d, label=col_n.replace('數',''), color=color, bins=k_b, 
                                  stat='count', alpha=0.4, ax=ax, edgecolor='white')
+                    
                     if len(vals_d) > 2:
                         m_d = np.average(vals_d, weights=wgts_d)
                         s_d = np.sqrt(np.average((vals_d - m_d)**2, weights=wgts_d))
@@ -95,17 +142,15 @@ if uploaded_file is not None:
 
         for thickness in thickness_list:
             df_thickness = df[df['厚度歸類'] == thickness]
-            st.markdown(f"### 📏 Analysis for Thickness: **{thickness}**")
-            cols_dist = st.columns(2)
-            for idx, feat in enumerate(['YS', 'TS', 'EL', 'YPE']):
-                if feat in mech_features:
-                    with cols_dist[idx % 2]:
-                        fig, ax = plt.subplots(figsize=(10, 5))
-                        plot_feature_dist(ax, df_thickness, feat, thickness, is_right_col=(idx % 2 != 0))
-                        st.pyplot(fig)
-                        fig.savefig(f"dist_{feat}_{thickness}.png", bbox_inches='tight')
-            st.markdown("---")
-
+            with st.expander(f"📏 Click to expand Analysis for Thickness: {thickness}"):
+                cols_dist = st.columns(2)
+                for idx, feat in enumerate(['YS', 'TS', 'EL', 'YPE']):
+                    if feat in mech_features:
+                        with cols_dist[idx % 2]:
+                            fig, ax = plt.subplots(figsize=(10, 5))
+                            plot_feature_dist(ax, df_thickness, feat, thickness, is_right_col=(idx % 2 != 0))
+                            st.pyplot(fig)
+                            fig.savefig(f"dist_{feat}_{thickness}.png", bbox_inches='tight')
     # --- TAB 3: OPTIMIZATION (Executive View - Based on A-B & Above) ---
     with tab3:
         st.header("3. Production Control Limits & Goals (A-B & Above Focused)")
