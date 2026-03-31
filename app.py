@@ -57,7 +57,6 @@ if uploaded_file is not None:
             
         display_df = summary_df.copy()
         display_df.rename(columns={'厚度歸類': 'Thickness'}, inplace=True)
-        # Đã đổi STT thành No.
         display_df.insert(0, 'No.', range(1, len(display_df) + 1))
         
         cols_to_int = count_cols + ['Total Coils']
@@ -219,7 +218,6 @@ if uploaded_file is not None:
                 if high is not None and safe_val > high:
                     status = "⚠ Risk (above limit)"
 
-                # Sắp xếp đúng logic và đổi tên cột Proposed thành Safe Spec Tolerance
                 row_data = {
                     "Thickness": thick,
                     "Feature": feat,
@@ -278,6 +276,9 @@ if uploaded_file is not None:
                     
                     ax2.set_title(f"Moving Range Chart for {feat}")
                     ax2.legend(loc='upper right')
+                    
+                    # THÊM LỆNH GIÃN CÁCH TỰ ĐỘNG Ở ĐÂY
+                    fig.tight_layout(pad=2.0)
                     
                     st.pyplot(fig)
             st.markdown("---")
