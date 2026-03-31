@@ -57,7 +57,7 @@ if uploaded_file is not None:
             
         display_df = summary_df.copy()
         display_df.rename(columns={'厚度歸類': 'Thickness'}, inplace=True)
-        display_df.insert(0, 'STT', range(1, len(display_df) + 1))
+        display_df.insert(0, 'No.', range(1, len(display_df) + 1))
         
         cols_to_int = count_cols + ['Total Coils']
         for c in cols_to_int:
