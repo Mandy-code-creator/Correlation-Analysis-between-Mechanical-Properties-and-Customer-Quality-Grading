@@ -68,11 +68,20 @@ if uploaded_file is not None:
             display_df[c] = display_df[c].astype(int)
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-    # --- TAB 2: DISTRIBUTION (CÂN ĐỐI + NHÃN SO LE) ---
+    # --- TAB 2: DISTRIBUTION (FIXED: BALANCED OVERALL & READABLE DETAILS) ---
     with tab2:
         st.header("2. Mechanical Properties Distribution Analysis")
         
-        def plot_standard_dist(ax, data, feat, title_suffix, is_right_col=False):
+        # 1. FIND GLOBAL LIMIT FOR OVERALL SECTION ONLY
+        max_counts_ov = []
+        for f in ['YS', 'TS', 'EL', 'YPE']:
+            if f in df.columns:
+                temp_total = df[count_cols].sum(axis=1)
+                max_counts_ov.append(temp_total.max())
+        # Large scale for Overall
+        global_y_limit_ov = max(max_counts_ov) * 1.25 if max_counts_ov else 600
+
+        def plot_standard_dist(ax, data, feat, title_suffix, is_overall=False, is_right_col=False):
             N_t = data['Total_Count'].sum()
             k_b = 15 
             color_map = {'A-B+數': '#2ca02c', 'A-B-數': '#ff7f0e', 'B+數': '#d62728', 'B數': '#9467bd', 'A-B數': '#1f77b4'}
@@ -84,6 +93,7 @@ if uploaded_file is not None:
                 if len(temp_d) >= 1:
                     vals_d, wgts_d = temp_d[feat].values, temp_d[col_n].values
                     color = color_map.get(col_n, '#7f7f7f')
+                    
                     sns.histplot(x=vals_d, weights=wgts_d, label=col_n.replace('數',''), 
                                  color=color, bins=k_b, stat='count', alpha=0.4, ax=ax, edgecolor='white')
                     
@@ -97,13 +107,23 @@ if uploaded_file is not None:
                         bin_w = (vals_d.max() - vals_d.min()) / k_b if vals_d.max() != vals_d.min() else 1
                         ax.plot(x_range, stats.norm.pdf(x_range, m_d, s_d) * wgts_d.sum() * bin_w, color=color, lw=2)
 
-            ax.set_ylim(0, global_y_limit)
+            # --- DYNAMIC SCALING LOGIC ---
+            if is_overall:
+                # Use the big global scale for Overall charts
+                current_limit = global_y_limit_ov
+            else:
+                # Auto-scale for Detailed charts so bars are visible
+                local_max = data[count_cols].sum(axis=1).max()
+                current_limit = local_max * 1.3 if local_max > 0 else 100
+            
+            ax.set_ylim(0, current_limit)
 
+            # Labels staggered based on current limit
             if mean_inf:
                 mean_inf.sort(key=lambda x: x['val'])
                 levels = [0.92, 0.82, 0.72, 0.62] 
                 for i_m, info in enumerate(mean_inf):
-                    y_p = global_y_limit * levels[i_m % len(levels)]
+                    y_p = current_limit * levels[i_m % len(levels)]
                     ax.text(info['val'], y_p, f"{info['val']:.1f}", color=info['color'], 
                             fontsize=8, fontweight='bold', ha='center', va='center',
                             bbox=dict(facecolor='white', alpha=0.9, edgecolor=info['color'], boxstyle='round,pad=0.2'))
@@ -112,146 +132,101 @@ if uploaded_file is not None:
             if is_right_col: 
                 ax.legend(title="Grade", bbox_to_anchor=(1.05, 1), loc='upper left')
 
+        # --- DRAWING SECTION ---
         st.subheader("🌐 Overall Factory Distribution")
         ov_cols = st.columns(2)
         for idx, feat in enumerate(['YS', 'TS', 'EL', 'YPE']):
             if feat in mech_features:
                 with ov_cols[idx % 2]:
                     fig_ov, ax_ov = plt.subplots(figsize=(10, 5))
-                    plot_standard_dist(ax_ov, df, feat, "Overall", is_right_col=(idx % 2 != 0))
+                    # Set is_overall=True
+                    plot_standard_dist(ax_ov, df, feat, "Overall", is_overall=True, is_right_col=(idx % 2 != 0))
                     st.pyplot(fig_ov)
-                    fig_ov.savefig(f"overall_{feat}.png", bbox_inches='tight')
 
         st.markdown("---")
         st.subheader("🔍 Detailed Distribution per Thickness")
         thickness_list = sorted(df['厚度歸類'].dropna().unique(), key=lambda x: float(x))
         for thick in thickness_list:
             df_thick = df[df['厚度歸類'] == thick]
-            st.markdown(f"### 📏 Thickness: **{thick}**")
+            st.markdown(f"### 📏 Thickness Grade: **{thick}**")
             cols_dist = st.columns(2)
             for idx, feat in enumerate(['YS', 'TS', 'EL', 'YPE']):
                 if feat in mech_features:
                     with cols_dist[idx % 2]:
                         fig, ax = plt.subplots(figsize=(10, 5))
-                        plot_standard_dist(ax, df_thick, feat, f"Thick {thick}", is_right_col=(idx % 2 != 0))
+                        # Set is_overall=False for auto-scaling
+                        plot_standard_dist(ax, df_thick, feat, f"Thick {thick}", is_overall=False, is_right_col=(idx % 2 != 0))
                         st.pyplot(fig)
-                        fig.savefig(f"dist_{feat}_{thick}.png", bbox_inches='tight')
 
-# --- TAB 3: OPTIMIZATION (GỘP A-B TRỞ LÊN & THÊM GIỚI HẠN TỔNG THỂ) ---
+# --- TAB 3: OPTIMIZATION ---
     with tab3:
-        st.header("3. Production Control Limits & Goals (A-B & Above Focused)")
-        
-        # 1. Cấu hình chung
-        sigma_choice = st.radio("Select Sigma Factor for Mill Safety Zone", [2.0, 2.5, 3.0], index=0)
+        st.header("3. Production Control Limits & Targets (A-B & Above)")
+        sigma_choice = st.radio("Select Confidence Interval (Sigma Factor)", [2.0, 2.5, 3.0], index=0)
         spec_limits = {"YS": (405, 500), "TS": (415, 550), "EL": (25, None), "YPE": (4, None)}
         good_cols = [c for c in ['A-B+數', 'A-B數'] if c in df.columns]
 
-        # ---------------------------------------------------------
-        # PHẦN MỚI: TÍNH TOÁN GIỚI HẠN KIỂM SOÁT TỔNG THỂ (OVERALL)
-        # ---------------------------------------------------------
-        st.subheader("🌐 Overall Factory Control Limits (0.5 ~ 0.8 Combined)")
-        st.info("Bảng này tính toán mục tiêu dựa trên toàn bộ dữ liệu hàng đạt (A-B trở lên) của nhà máy.")
-        
+        # OVERALL SECTION
+        st.subheader("🌐 Overall Factory Performance Goals")
         overall_status = []
         for feat in mech_features:
             if good_cols:
-                # Lọc dữ liệu hàng tốt trên toàn bộ dataframe
-                df_overall = df[[feat] + good_cols].dropna(subset=[feat])
-                df_overall['Good_Qty'] = df_overall[good_cols].sum(axis=1)
-                df_overall = df_overall[df_overall['Good_Qty'] > 0]
-                
-                if not df_overall.empty:
-                    v_o, w_o = df_overall[feat].values, df_overall['Good_Qty'].values
-                    # Lọc nhiễu IQR tổng thể
-                    q1_o, q3_o = np.percentile(v_o, 25), np.percentile(v_o, 75)
-                    iqr_o = q3_o - q1_o
-                    mask_o = (v_o >= q1_o - 1.5*iqr_o) & (v_o <= q3_o + 1.5*iqr_o)
-                    vf_o, wf_o = v_o[mask_o], w_o[mask_o]
-                    
-                    m_ov = np.average(vf_o, weights=wf_o)
-                    s_ov = np.sqrt(np.average((vf_o - m_ov)**2, weights=wf_o))
-                    
+                df_ov = df[[feat] + good_cols].dropna(subset=[feat])
+                df_ov['Good_Qty'] = df_ov[good_cols].sum(axis=1)
+                df_ov = df_ov[df_ov['Good_Qty'] > 0]
+                if not df_ov.empty:
+                    v, w = df_ov[feat].values, df_ov['Good_Qty'].values
+                    q1, q3 = np.percentile(v, 25), np.percentile(v, 75)
+                    iqr = q3 - q1
+                    mask = (v >= q1 - 1.5*iqr) & (v <= q3 + 1.5*iqr)
+                    vf, wf = v[mask], w[mask]
+                    m_ov = np.average(vf, weights=wf)
+                    s_ov = np.sqrt(np.average((vf - m_ov)**2, weights=wf))
                     low, high = spec_limits.get(feat, (None, None))
-                    spec_s = f"{int(low)}–{int(high)}" if low and high else (f">={int(low)}" if low else "N/A")
-                    
+                    spec_s = f"{int(low)}-{int(high)}" if low and high else (f">={int(low)}" if low else "N/A")
                     overall_status.append({
-                        "Feature": feat,
-                        "Standard Limit": spec_s,
-                        "Overall Target": int(round(m_ov)),
-                        f"Overall Tol (±{sigma_choice}σ)": int(round(sigma_choice * s_ov)),
-                        "Overall Mill Range": f"{int(round(m_ov - sigma_choice*s_ov))}–{int(round(m_ov + sigma_choice*s_ov))}"
+                        "Feature": feat, "Current Spec": spec_s,
+                        "Global Target": int(round(m_ov)),
+                        f"Global Tol (±{sigma_choice}σ)": int(round(sigma_choice * s_ov)),
+                        "Factory Mill Range": f"{int(round(m_ov - sigma_choice*s_ov))}-{int(round(m_ov + sigma_choice*s_ov))}"
                     })
-
-        if overall_status:
-            st.dataframe(pd.DataFrame(overall_status), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(overall_status), use_container_width=True, hide_index=True)
 
         st.markdown("---")
-
-        # ---------------------------------------------------------
-        # PHẦN CHI TIẾT: GIỚI HẠN THEO TỪNG ĐỘ DÀY (GIỮ NGUYÊN NHƯ CŨ)
-        # ---------------------------------------------------------
-        st.subheader("🔍 Detailed Limits per Thickness Category")
-        thickness_list = sorted(df['厚度歸類'].dropna().unique(), key=lambda x: float(x))
+        # DETAILED SECTION
+        st.subheader("🔍 Local Control Limits by Thickness")
         all_export_data = []
-        plot_data_dict = {}
-
         for thick in thickness_list:
-            st.markdown(f"#### 📏 Thickness Category: **{thick}**")
+            st.markdown(f"#### Thickness Category: **{thick}**")
             df_t = df[df['厚度歸類'] == thick]
-            plot_data_dict[thick] = {}
             thick_status = []
-            
             for feat in mech_features:
                 temp_calc = df_t[[feat] + good_cols].dropna(subset=[feat]) if good_cols else pd.DataFrame()
                 if not temp_calc.empty:
                     temp_calc['Good_Qty'] = temp_calc[good_cols].sum(axis=1)
                     temp_calc = temp_calc[temp_calc['Good_Qty'] > 0]
-
-                low, high = spec_limits.get(feat, (None, None))
-                spec_str = f"{int(low)}–{int(high)}" if low and high else (f">={int(low)}" if low else "N/A")
-
                 if not temp_calc.empty:
-                    v_f, w_f = temp_calc[feat].values, temp_calc['Good_Qty'].values
-                    q1, q3 = np.percentile(v_f, 25), np.percentile(v_f, 75)
-                    iqr = q3 - q1
-                    mask = (v_f >= q1 - 1.5*iqr) & (v_f <= q3 + 1.5*iqr)
-                    vf, wf = v_f[mask] if mask.sum() > 0 else v_f, w_f[mask] if mask.sum() > 0 else w_f
-                    
-                    m_v = np.average(vf, weights=wf)
-                    s_v = np.sqrt(np.average((vf - m_v)**2, weights=wf))
-                    plot_data_dict[thick][feat] = {'values': vf, 'mean': m_v, 'std': s_v}
-                    
+                    v, w = temp_calc[feat].values, temp_calc['Good_Qty'].values
+                    m_v = np.average(v, weights=w)
+                    s_v = np.sqrt(np.average((v - m_v)**2, weights=w))
+                    low, high = spec_limits.get(feat, (None, None))
+                    spec_str = f"{int(low)}-{int(high)}" if low and high else (f">={int(low)}" if low else "N/A")
                     row = {
-                        "Feature": feat, "Current Limit": spec_str,
-                        "Target Goal": int(round(m_v)),
+                        "Feature": feat, "Spec Limit": spec_str,
+                        "Local Target": int(round(m_v)),
                         f"Tol (±{sigma_choice}σ)": int(round(sigma_choice * s_v)),
-                        "Proposed Mill Range": f"{int(round(m_v - sigma_choice*s_v))}–{int(round(m_v + sigma_choice*s_v))}"
+                        "Proposed Mill Range": f"{int(round(m_v - sigma_choice*s_v))}-{int(round(m_v + sigma_choice*s_v))}"
                     }
                     thick_status.append(row)
                     exp_row = row.copy(); exp_row['Thickness'] = thick; all_export_data.append(exp_row)
-
             st.dataframe(pd.DataFrame(thick_status), use_container_width=True, hide_index=True)
-            
-            # Biểu đồ I-MR cho từng độ dày
-            c_imr = st.columns(2)
-            top4 = [f for f in ['YS', 'TS', 'EL', 'YPE'] if f in plot_data_dict[thick]]
-            for idx, f in enumerate(top4):
-                with c_imr[idx % 2]:
-                    d = plot_data_dict[thick][f]
-                    v, mv, sv = d['values'], d['mean'], d['std']
-                    if len(v) > 1:
-                        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 7))
-                        U, L = mv + sigma_choice*sv, mv - sigma_choice*sv
-                        ax1.plot(v, marker='o', color='blue', ms=3, lw=1)
-                        ax1.axhline(mv, color='green', ls='--')
-                        ax1.axhline(U, color='red', ls='--'); ax1.axhline(L, color='red', ls='--')
-                        ax1.set_title(f"I-Chart: {f} (Thick {thick})")
-                        
-                        mr = np.abs(np.diff(v)); mrm = np.mean(mr)
-                        ax2.plot(mr, marker='o', color='orange', ms=3, lw=1)
-                        ax2.axhline(mrm, color='green', ls='--')
-                        ax2.set_title("Moving Range")
-                        fig.tight_layout(); st.pyplot(fig)
+
+    # --- EXPORT SECTION ---
+    st.sidebar.header("📥 Export Options")
+    if st.sidebar.button("Download Excel Report"):
+        towrite = io.BytesIO()
+        pd.DataFrame(all_export_data).to_excel(towrite, index=False, engine='openpyxl')
+        towrite.seek(0)
+        st.sidebar.download_button(label="Click to Download Excel", data=towrite, file_name="QC_Optimization_Report.xlsx")
     # --- PDF EXPORT ---
     st.markdown("### 🖨️ Export PDF Executive Report")
     def clean(t): return str(t).replace('±', '+/-').replace('–', '-').encode('latin-1', 'ignore').decode('latin-1')
