@@ -64,18 +64,29 @@ if uploaded_file is not None:
                 
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-   # --- TAB 2: DISTRIBUTION (BẢN CHUẨN CĂN LỀ & FIX YPE SCALE) ---
+  # --- TAB 2: DISTRIBUTION (BẢN CÂN ĐỐI TUYỆT ĐỐI) ---
     with tab2:
         st.header("2. Mechanical Properties Distribution Analysis")
         
+        # 1. TÌM GIÁ TRỊ CAO NHẤT TOÀN CỤC ĐỂ ĐỒNG NHẤT THANG ĐO
+        # Chúng ta tính tổng số lượng cuộn (bar height) lớn nhất trong tất cả features
+        max_counts = []
+        for f in ['YS', 'TS', 'EL', 'YPE']:
+            if f in df.columns:
+                # Tính chiều cao cột cao nhất thực tế của feature đó
+                # (Dùng bins=15 làm chuẩn để ước lượng chiều cao tối đa)
+                temp_total = df[count_cols].sum(axis=1)
+                max_counts.append(temp_total.max())
+        
+        # Thang đo chung = Giá trị lớn nhất tìm được + 15% khoảng hở để đặt Label
+        global_y_limit = max(max_counts) * 1.15 if max_counts else 500
+
         def plot_standard_dist(ax, data, feat, title_suffix, is_right_col=False):
-            # 1. Chuẩn bị dữ liệu
             N_t = data['Total_Count'].sum()
-            k_b = max(int(1 + 3.322 * math.log10(N_t)) if N_t > 0 else 10, 5)
+            k_b = 15 # Cố định số bin để các biểu đồ có độ rộng cột đồng nhất
             color_map = {'A-B+數': '#2ca02c', 'A-B-數': '#ff7f0e', 'B+數': '#d62728', 'B數': '#9467bd', 'A-B數': '#1f77b4'}
             mean_inf = []
             
-            # 2. Vẽ từng Grade
             for col_n in count_cols:
                 temp_d = data[[feat, col_n]].dropna()
                 temp_d = temp_d[temp_d[col_n] > 0]
@@ -83,69 +94,69 @@ if uploaded_file is not None:
                     vals_d, wgts_d = temp_d[feat].values, temp_d[col_n].values
                     color = color_map.get(col_n, '#7f7f7f')
                     
-                    # Vẽ Histogram
                     sns.histplot(x=vals_d, weights=wgts_d, label=col_n.replace('數',''), 
                                  color=color, bins=k_b, stat='count', alpha=0.4, ax=ax, edgecolor='white')
                     
-                    # Tính Weighted Mean
                     m_d = np.average(vals_d, weights=wgts_d)
                     s_d = np.sqrt(np.average((vals_d - m_d)**2, weights=wgts_d))
-                    
-                    # Vẽ đường kẻ Mean
                     ax.axvline(m_d, color=color, ls='--', lw=2)
                     mean_inf.append({'val': m_d, 'color': color})
 
-                    # Vẽ đường cong chuẩn
                     if len(vals_d) > 2 and s_d > 0:
                         x_range = np.linspace(m_d - 4*s_d, m_d + 4*s_d, 100)
+                        # Tính bin_width cố định dựa trên range của dữ liệu
                         bin_w = (vals_d.max() - vals_d.min()) / k_b if vals_d.max() != vals_d.min() else 1
                         ax.plot(x_range, stats.norm.pdf(x_range, m_d, s_d) * wgts_d.sum() * bin_w, color=color, lw=2)
 
-            # 3. Hiển thị nhãn giá trị Mean (Căn lề thẳng hàng)
+            # ĐẶT THANG ĐO CHUNG CHO TẤT CẢ BIỂU ĐỒ
+            ax.set_ylim(0, global_y_limit)
+
+            # Hiển thị nhãn Mean (đặt ở vị trí tương đối so với thang đo chung)
             if mean_inf:
                 mean_inf.sort(key=lambda x: x['val'])
-                y_max = ax.get_ylim()[1]
                 for i_m, info in enumerate(mean_inf):
-                    y_p = y_max * (0.9 - (i_m % 3) * 0.1)
+                    y_p = global_y_limit * (0.9 - (i_m % 3) * 0.08)
                     ax.text(info['val'], y_p, f"{info['val']:.1f}", color=info['color'], 
                             fontsize=9, fontweight='bold', ha='center',
-                            bbox=dict(facecolor='white', alpha=0.8, edgecolor=info['color'], boxstyle='round,pad=0.2'))
+                            bbox=dict(facecolor='white', alpha=0.8, edgecolor=info['color'], boxstyle='round,pad=0.1'))
 
-            # 4. Tự động ép thang đo Y để biểu đồ YPE không bị nhỏ (Fix lỗi Blanco)
-            current_y_max = ax.get_ylim()[1]
-            ax.set_ylim(0, current_y_max * 1.1) # Chỉ để hở 10% phía trên cho đẹp
-
-            # ĐÂY LÀ DÒNG BỊ LỖI - ĐÃ CĂN THẲNG HÀNG 100%
             ax.set_title(f"{feat} - {title_suffix}", fontsize=12, fontweight='bold')
             if is_right_col: 
                 ax.legend(title="Grade", bbox_to_anchor=(1.05, 1), loc='upper left')
 
-        # --- PHẦN VẼ BIỂU ĐỒ ---
+        # --- PHẦN VẼ (Giữ nguyên cấu trúc gọi hàm) ---
         st.subheader("🌐 Overall Factory Distribution")
         ov_cols = st.columns(2)
         for idx, feat in enumerate(['YS', 'TS', 'EL', 'YPE']):
             if feat in mech_features:
                 with ov_cols[idx % 2]:
                     fig_ov, ax_ov = plt.subplots(figsize=(10, 5))
-                    plot_standard_dist(ax_ov, df, feat, "Overall", is_right_col=(idx % 2 != 0))
+                    # --- PHẦN CẬP NHẬT: HIỂN THỊ NHÃN SO LE TRÁNH ĐÈ NHAU ---
+            if mean_inf:
+                # 1. Sắp xếp các nhãn theo giá trị Mean từ nhỏ đến lớn
+                mean_inf.sort(key=lambda x: x['val'])
+                
+                # 2. Định nghĩa các tầng cao thấp (Dùng 4 tầng để giãn tối đa)
+                # Tầng 1 là cao nhất (92%), các tầng sau thấp dần
+                levels = [0.92, 0.82, 0.72, 0.62] 
+                
+                for i_m, info in enumerate(mean_inf):
+                    # Chọn tầng dựa trên số thứ tự
+                    level_idx = i_m % len(levels)
+                    y_p = global_y_limit * levels[level_idx]
+                    
+                    # Vẽ đường kẻ phụ từ nhãn xuống (tùy chọn, giúp dễ nhìn hơn)
+                    # ax.plot([info['val'], info['val']], [y_p, info['val']], color=info['color'], lw=0.5, alpha=0.3)
+                    
+                    # Hiển thị nhãn số với khung trắng bo góc
+                    ax.text(info['val'], y_p, f"{info['val']:.1f}", 
+                            color=info['color'], 
+                            fontsize=8, 
+                            fontweight='bold', 
+                            ha='center', 
+                            va='center',
+                            bbox=dict(facecolor='white', alpha=0.9, edgecolor=info['color'], boxstyle='round,pad=0.2'))
                     st.pyplot(fig_ov)
-                    fig_ov.savefig(f"overall_{feat}.png", bbox_inches='tight')
-
-        st.markdown("---")
-        st.subheader("🔍 Detailed Distribution per Thickness")
-        thickness_list = sorted(df['厚度歸類'].dropna().unique(), key=lambda x: float(x))
-        for thick in thickness_list:
-            df_thick = df[df['厚度歸類'] == thick]
-            st.markdown(f"### 📏 Thickness: **{thick}**")
-            cols_dist = st.columns(2)
-            for idx, feat in enumerate(['YS', 'TS', 'EL', 'YPE']):
-                if feat in mech_features:
-                    with cols_dist[idx % 2]:
-                        fig, ax = plt.subplots(figsize=(10, 5))
-                        plot_standard_dist(ax, df_thick, feat, f"Thick {thick}", is_right_col=(idx % 2 != 0))
-                        st.pyplot(fig)
-                        fig.savefig(f"dist_{feat}_{thick}.png", bbox_inches='tight')
-            st.markdown("---")
     # --- TAB 3: OPTIMIZATION (Executive View - Based on A-B & Above) ---
     with tab3:
         st.header("3. Production Control Limits & Goals (A-B & Above Focused)")
