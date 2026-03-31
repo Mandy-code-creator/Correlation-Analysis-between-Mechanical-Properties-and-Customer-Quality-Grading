@@ -64,76 +64,82 @@ if uploaded_file is not None:
                 
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-   # --- TAB 2: DISTRIBUTION (ĐÚNG THIẾT KẾ BAN ĐẦU + THÊM SO SÁNH) ---
+   # --- TAB 2: DISTRIBUTION (CÓ TRUNG BÌNH CÓ TRỌNG SỐ) ---
     with tab2:
         st.header("2. Mechanical Properties Distribution Analysis")
         
-        # Lấy danh sách độ dày chính xác
-        thickness_list = sorted(df['厚度歸類'].dropna().unique(), key=lambda x: float(x))
-        
-        # ---------------------------------------------------------
-        # PHẦN MỚI THÊM: BIỂU ĐỒ SO SÁNH TỔNG HỢP (KHÔNG PHÂN LOẠI)
-        # ---------------------------------------------------------
-        st.subheader("📌 Cross-Thickness Comparison (0.5 ~ 0.8)")
-        comp_cols = st.columns(2)
-        for idx, feat in enumerate(['YS', 'TS', 'EL', 'YPE']):
-            if feat in mech_features:
-                with comp_cols[idx % 2]:
-                    fig_comp, ax_comp = plt.subplots(figsize=(10, 6))
-                    for thick in thickness_list:
-                        df_thick = df[df['厚度歸類'] == thick].dropna(subset=[feat])
-                        if not df_thick.empty:
-                            vals = df_thick[feat].values
-                            weights = df_thick[count_cols].sum(axis=1).values
-                            if weights.sum() > 0:
-                                sns.kdeplot(x=vals, weights=weights, label=f"Thick {thick}", 
-                                            ax=ax_comp, fill=True, alpha=0.1, linewidth=2)
-                    ax_comp.set_title(f"Comparison: {feat} across Thicknesses", fontsize=12, fontweight='bold')
-                    ax_comp.legend(title="Thickness")
-                    st.pyplot(fig_comp)
-                    fig_comp.savefig(f"compare_{feat}.png", bbox_inches='tight')
-
-        st.markdown("---")
-
-        # ---------------------------------------------------------
-        # PHẦN CHI TIẾT: GIỮ NGUYÊN THIẾT KẾ BAN ĐẦU CỦA MANDY
-        # ---------------------------------------------------------
-        st.subheader("🔍 Detailed Distribution per Thickness Category")
-        color_map = {'A-B+數': '#2ca02c', 'A-B-數': '#ff7f0e', 'B+數': '#d62728', 'B數': '#9467bd', 'A-B數': '#1f77b4'}
-
-        def plot_feature_dist(ax, data, feat, thick, is_right_col=False):
+        # Hàm vẽ biểu đồ chuẩn của Mandy: Có Mean Label và Histogram
+        def plot_standard_dist(ax, data, feat, title_suffix, is_right_col=False):
             N_t = data['Total_Count'].sum()
             k_b = max(int(1 + 3.322 * math.log10(N_t)) if N_t > 0 else 10, 5)
+            color_map = {'A-B+數': '#2ca02c', 'A-B-數': '#ff7f0e', 'B+數': '#d62728', 'B數': '#9467bd', 'A-B數': '#1f77b4'}
+            mean_inf = []
+            
             for col_n in count_cols:
                 temp_d = data[[feat, col_n]].dropna()
                 temp_d = temp_d[temp_d[col_n] > 0]
                 if len(temp_d) >= 1:
                     vals_d, wgts_d = temp_d[feat].values, temp_d[col_n].values
                     color = color_map.get(col_n, '#7f7f7f')
-                    sns.histplot(x=vals_d, weights=wgts_d, label=col_n.replace('數',''), color=color, bins=k_b, 
-                                 stat='count', alpha=0.4, ax=ax, edgecolor='white')
-                    if len(vals_d) > 2:
-                        m_d = np.average(vals_d, weights=wgts_d)
-                        s_d = np.sqrt(np.average((vals_d - m_d)**2, weights=wgts_d))
-                        if s_d > 0:
-                            x_range = np.linspace(m_d - 4*s_d, m_d + 4*s_d, 100)
-                            bin_w = (vals_d.max() - vals_d.min()) / k_b if vals_d.max() != vals_d.min() else 1
-                            ax.plot(x_range, stats.norm.pdf(x_range, m_d, s_d) * wgts_d.sum() * bin_w, color=color, lw=2)
-            ax.set_title(f"{feat} - Thick: {thick}")
+                    
+                    # Vẽ Histogram
+                    sns.histplot(x=vals_d, weights=wgts_d, label=col_n.replace('數',''), 
+                                 color=color, bins=k_b, stat='count', alpha=0.4, ax=ax, edgecolor='white')
+                    
+                    # Tính Weighted Mean
+                    m_d = np.average(vals_d, weights=wgts_d)
+                    s_d = np.sqrt(np.average((vals_d - m_d)**2, weights=wgts_d))
+                    
+                    # Vẽ đường kẻ Mean và lưu thông tin nhãn
+                    ax.axvline(m_d, color=color, ls='--', lw=2)
+                    mean_inf.append({'val': m_d, 'color': color})
+
+                    # Vẽ đường cong chuẩn
+                    if len(vals_d) > 2 and s_d > 0:
+                        x_range = np.linspace(m_d - 4*s_d, m_d + 4*s_d, 100)
+                        bin_w = (vals_d.max() - vals_d.min()) / k_b if vals_d.max() != vals_d.min() else 1
+                        ax.plot(x_range, stats.norm.pdf(x_range, m_d, s_d) * wgts_d.sum() * bin_w, color=color, lw=2)
+
+            # Hiển thị nhãn giá trị Mean
+            if mean_inf:
+                mean_inf.sort(key=lambda x: x['val'])
+                y_max = ax.get_ylim()[1]
+                for i_m, info in enumerate(mean_inf):
+                    y_p = y_max * (0.9 - (i_m % 3) * 0.1) # Tránh đè nhãn
+                    ax.text(info['val'], y_p, f"{info['val']:.1f}", color=info['color'], 
+                            fontsize=9, fontweight='bold', ha='center',
+                            bbox=dict(facecolor='white', alpha=0.8, edgecolor=info['color'], boxstyle='round,pad=0.2'))
+
+            ax.set_title(f"{feat} - {title_suffix}", fontsize=12, fontweight='bold')
             if is_right_col: ax.legend(title="Grade", bbox_to_anchor=(1.05, 1), loc='upper left')
 
-        # Vẽ thẳng ra luôn, không dùng expander nữa
-        for thickness in thickness_list:
-            df_thickness = df[df['厚度歸類'] == thickness]
-            st.markdown(f"### 📏 Analysis for Thickness: **{thickness}**")
+        # --- PHẦN 1: OVERALL (TỔNG HỢP TOÀN BỘ) ---
+        st.subheader("🌐 Overall Factory Distribution (All Thicknesses)")
+        ov_cols = st.columns(2)
+        for idx, feat in enumerate(['YS', 'TS', 'EL', 'YPE']):
+            if feat in mech_features:
+                with ov_cols[idx % 2]:
+                    fig_ov, ax_ov = plt.subplots(figsize=(10, 5))
+                    plot_standard_dist(ax_ov, df, feat, "Overall", is_right_col=(idx % 2 != 0))
+                    st.pyplot(fig_ov)
+                    fig_ov.savefig(f"overall_{feat}.png", bbox_inches='tight')
+
+        st.markdown("---")
+
+        # --- PHẦN 2: CHI TIẾT TỪNG ĐỘ DÀY ---
+        st.subheader("🔍 Detailed Distribution per Thickness Category")
+        thickness_list = sorted(df['厚度歸類'].dropna().unique(), key=lambda x: float(x))
+        for thick in thickness_list:
+            df_thick = df[df['厚度歸類'] == thick]
+            st.markdown(f"### 📏 Thickness: **{thick}**")
             cols_dist = st.columns(2)
             for idx, feat in enumerate(['YS', 'TS', 'EL', 'YPE']):
                 if feat in mech_features:
                     with cols_dist[idx % 2]:
                         fig, ax = plt.subplots(figsize=(10, 5))
-                        plot_feature_dist(ax, df_thickness, feat, thickness, is_right_col=(idx % 2 != 0))
+                        plot_standard_dist(ax, df_thick, feat, f"Thick {thick}", is_right_col=(idx % 2 != 0))
                         st.pyplot(fig)
-                        fig.savefig(f"dist_{feat}_{thickness}.png", bbox_inches='tight')
+                        fig.savefig(f"dist_{feat}_{thick}.png", bbox_inches='tight')
             st.markdown("---")
     # --- TAB 3: OPTIMIZATION (Executive View - Based on A-B & Above) ---
     with tab3:
