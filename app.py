@@ -276,22 +276,46 @@ if uploaded_file is not None:
                             fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 7))
                             U, L = m_v + sigma_choice*s_v, m_v - sigma_choice*s_v
                             
-                            ax1.plot(v, marker='o', color='blue', markersize=4)
+                            # -----------------------------------------
+                            # 1. Individuals Chart (Biểu đồ cá nhân)
+                            # -----------------------------------------
+                            # Vẽ đường line nối các điểm màu xanh làm nền (zorder=1 để nằm dưới)
+                            ax1.plot(v, marker='o', color='blue', markersize=4, zorder=1)
+                            
+                            # Tìm và TÔ ĐỎ các điểm vượt ngoài giới hạn UCL hoặc LCL
+                            outliers_idx = np.where((v > U) | (v < L))[0]
+                            if len(outliers_idx) > 0:
+                                ax1.scatter(outliers_idx, v[outliers_idx], color='red', s=35, zorder=2, label='Out of Control')
+                            
                             ax1.axhline(m_v, color='green', ls='--', label=f'Mean: {int(round(m_v))}')
                             ax1.axhline(U, color='red', ls='--', label=f'UCL: {int(round(U))}')
                             ax1.axhline(L, color='red', ls='--', label=f'LCL: {int(round(L))}')
                             ax1.set_title(f"Individuals Chart: {feat} (Unified Data) - Thick {thick}")
                             ax1.legend(loc='upper right', fontsize=8)
                             
+                            # -----------------------------------------
+                            # 2. Moving Range Chart (Biểu đồ khoảng biến thiên)
+                            # -----------------------------------------
                             MR = np.abs(np.diff(v))
-                            ax2.plot(MR, marker='o', color='orange', markersize=4)
-                            ax2.axhline(np.mean(MR), color='green', ls='--', label=f'MR Mean: {int(round(np.mean(MR)))}')
+                            MR_mean = np.mean(MR)
+                            MR_UCL = 3.267 * MR_mean # Công thức chuẩn tính giới hạn trên của biểu đồ MR
+                            
+                            # Vẽ line cam làm nền
+                            ax2.plot(MR, marker='o', color='orange', markersize=4, zorder=1)
+                            
+                            # Tìm và TÔ ĐỎ các điểm vượt giới hạn biến thiên (Vượt MR UCL)
+                            mr_outliers_idx = np.where(MR > MR_UCL)[0]
+                            if len(mr_outliers_idx) > 0:
+                                ax2.scatter(mr_outliers_idx, MR[mr_outliers_idx], color='red', s=35, zorder=2)
+                            
+                            ax2.axhline(MR_mean, color='green', ls='--', label=f'MR Mean: {int(round(MR_mean))}')
+                            ax2.axhline(MR_UCL, color='red', ls='--', label=f'MR UCL: {int(round(MR_UCL))}')
                             ax2.set_title("Moving Range Chart")
                             ax2.legend(loc='upper right', fontsize=8)
                             
                             fig.tight_layout(pad=3.0)
                             st.pyplot(fig)
-                            fig.savefig(f"imr_{feat}_{thick}.png", bbox_inches='tight') 
+                            fig.savefig(f"imr_{feat}_{thick}.png", bbox_inches='tight')
             st.markdown("---")
 
         # --- EXPORT FINAL ---
