@@ -163,14 +163,16 @@ if uploaded_file is not None:
                 
                 low, high = spec_limits.get(feat, (None, None))
 
-                # --- CALCULATE MILL RANGE & TARGET GOAL ---
+                # --- NEW LOGIC: TIGHTENED RELEASE RANGE ---
                 prac_low, prac_high = None, None
                 
                 if low is not None and high is not None:
-                    release_range = f"{int(low)}–{int(high)}"
+                    # Bóp hẹp Spec ban đầu 5% để tạo Internal Release Range
                     theo_low = low + 0.05*(high-low)
                     theo_high = high - 0.05*(high-low)
+                    release_range = f"{int(round(theo_low))}–{int(round(theo_high))}"
                     
+                    # Mill Range logic: Intersection of New Release Range and Capability
                     prac_low = max(theo_low, LCL_I)
                     prac_high = min(theo_high, UCL_I)
                     
@@ -178,23 +180,23 @@ if uploaded_file is not None:
                     mill_range = f"{int(round(prac_low))}–{int(round(prac_high))}"
                     
                 elif low is not None:
-                    release_range = f">={int(low)}"
+                    # Bóp hẹp Spec dưới (chỉ có giới hạn dưới)
                     theo_low = low + 0.05*low
+                    release_range = f">={int(round(theo_low))}"
+                    
                     prac_low = max(theo_low, LCL_I)
                     mill_range = f">={int(round(prac_low))}"
                 else:
                     release_range = "N/A"
                     mill_range = "N/A"
 
-                # --- NEW TARGET GOAL LOGIC (BASED ONLY ON A-B+ & A-B) ---
+                # --- TARGET GOAL LOGIC (BASED ONLY ON A-B+ & A-B) ---
                 temp_target = df_t[[feat, 'A-B+數', 'A-B數']].dropna(subset=[feat])
                 weights = temp_target['A-B+數'] + temp_target['A-B數']
                 
                 if weights.sum() > 0:
-                    # Tính trung bình trọng số dựa trên số lượng hàng A-B và A-B+
                     target_goal = int(round(np.average(temp_target[feat], weights=weights)))
                 else:
-                    # Fallback dự phòng nếu không có cuộn nào đạt A-B hay A-B+
                     if prac_low is not None and prac_high is not None:
                         target_goal = int(round((prac_low + prac_high) / 2))
                     elif prac_low is not None:
@@ -202,7 +204,7 @@ if uploaded_file is not None:
                     else:
                         target_goal = "N/A"
 
-                # --- KHÔI PHỤC LẠI SEGMENT DISTRIBUTION ---
+                # --- SEGMENT DISTRIBUTION ---
                 seg_A_Bplusplus = df_t['A+B+數'].sum()
                 seg_A_Bplus = df_t['A-B+數'].sum()
                 seg_A_B = df_t['A-B數'].sum()
@@ -224,7 +226,7 @@ if uploaded_file is not None:
                 row_data = {
                     "Thickness": thick,
                     "Feature": feat,
-                    "Release Range (Spec)": release_range,
+                    "Internal Release Range": release_range, # Đổi tên cho Sếp dễ hiểu
                     "Segment Distribution": seg_dist,
                     "Target Goal": target_goal,
                     "Mill Range (Proposed)": mill_range,
