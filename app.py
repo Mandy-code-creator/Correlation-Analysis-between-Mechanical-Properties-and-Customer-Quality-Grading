@@ -166,16 +166,15 @@ if uploaded_file is not None:
                         st.pyplot(fig)
             st.markdown("---")
 
-# --- TAB 3: OPTIMIZATION & CONTROL CHARTS (I-MR RESTORED) ---
+# --- TAB 3: OPTIMIZATION & I-MR CHARTS ---
     with tab3:
         st.header("3. Production Control Limits & Goals (A-B & Above Focused)")
         
-        # 1. Configuration
         sigma_choice = st.radio("Select Confidence Interval (Sigma Factor)", [2.0, 2.5, 3.0], index=0)
         spec_limits = {"YS": (405, 500), "TS": (415, 550), "EL": (25, None), "YPE": (4, None)}
         good_cols = [c for c in ['A-B+數', 'A-B數'] if c in df.columns]
 
-        # --- OVERALL FACTORY TARGETS ---
+        # 1. Overall Factory Targets
         st.subheader("🌐 Overall Factory Performance Goals")
         overall_status = []
         for feat in mech_features:
@@ -183,35 +182,20 @@ if uploaded_file is not None:
                 df_ov = df[[feat] + good_cols].dropna(subset=[feat])
                 df_ov['Good_Qty'] = df_ov[good_cols].sum(axis=1)
                 df_ov = df_ov[df_ov['Good_Qty'] > 0]
-                
                 if not df_ov.empty:
-                    v_o, w_o = df_ov[feat].values, df_ov['Good_Qty'].values
-                    # IQR Filter
-                    q1_o, q3_o = np.percentile(v_o, 25), np.percentile(v_o, 75)
-                    iqr_o = q3_o - q1_o
-                    mask_o = (v_o >= q1_o - 1.5*iqr_o) & (v_o <= q3_o + 1.5*iqr_o)
-                    vf_o, wf_o = v_o[mask_o], w_o[mask_o]
-                    
-                    m_ov = np.average(vf_o, weights=wf_o)
-                    s_ov = np.sqrt(np.average((vf_o - m_ov)**2, weights=wf_o))
-                    
-                    low, high = spec_limits.get(feat, (None, None))
-                    spec_s = f"{int(low)}-{int(high)}" if low and high else (f">={int(low)}" if low else "N/A")
-                    
+                    v, w = df_ov[feat].values, df_ov['Good_Qty'].values
+                    m_ov = np.average(v, weights=w)
+                    s_ov = np.sqrt(np.average((v - m_ov)**2, weights=w))
                     overall_status.append({
-                        "Feature": feat, "Current Spec": spec_s,
-                        "Global Target": int(round(m_ov)),
-                        f"Global Tol (±{sigma_choice}σ)": int(round(sigma_choice * s_ov)),
+                        "Feature": feat, "Global Target": int(round(m_ov)),
                         "Factory Mill Range": f"{int(round(m_ov - sigma_choice*s_ov))}-{int(round(m_ov + sigma_choice*s_ov))}"
                     })
-        if overall_status:
-            st.dataframe(pd.DataFrame(overall_status), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(overall_status), use_container_width=True, hide_index=True)
 
         st.markdown("---")
 
-        # --- DETAILED LIMITS & I-MR CHARTS ---
+        # 2. Detailed Limits & I-MR Charts
         st.subheader("🔍 Local Control Limits & I-MR Trending")
-        thickness_list = sorted(df['厚度歸類'].dropna().unique(), key=lambda x: float(x))
         plot_data_dict = {}
 
         for thick in thickness_list:
@@ -225,31 +209,25 @@ if uploaded_file is not None:
                 if not temp_calc.empty:
                     temp_calc['Good_Qty'] = temp_calc[good_cols].sum(axis=1)
                     temp_calc = temp_calc[temp_calc['Good_Qty'] > 0]
-
-                low, high = spec_limits.get(feat, (None, None))
-                spec_str = f"{int(low)}-{int(high)}" if low and high else (f">={int(low)}" if low else "N/A")
-
+                
                 if not temp_calc.empty:
-                    v_f, w_f = temp_calc[feat].values, temp_calc['Good_Qty'].values
-                    q1, q3 = np.percentile(v_f, 25), np.percentile(v_f, 75)
-                    iqr = q3 - q1
-                    mask = (v_f >= q1 - 1.5*iqr) & (v_f <= q3 + 1.5*iqr)
-                    vf, wf = v_f[mask] if mask.sum() > 0 else v_f, w_f[mask] if mask.sum() > 0 else w_f
+                    v, w = temp_calc[feat].values, temp_calc['Good_Qty'].values
+                    mv = np.average(v, weights=w)
+                    sv = np.sqrt(np.average((v - mv)**2, weights=w))
+                    plot_data_dict[thick][feat] = {'values': v, 'mean': mv, 'std': sv}
                     
-                    m_v = np.average(vf, weights=wf)
-                    s_v = np.sqrt(np.average((vf - m_v)**2, weights=wf))
-                    plot_data_dict[thick][feat] = {'values': vf, 'mean': m_v, 'std': s_v}
-                    
-                    thick_status.append({
-                        "Feature": feat, "Spec": spec_str,
-                        "Local Target": int(round(m_v)),
-                        f"Tol (±{sigma_choice}σ)": int(round(sigma_choice * s_v)),
-                        "Proposed Mill Range": f"{int(round(m_v - sigma_choice*s_v))}-{int(round(m_v + sigma_choice*s_v))}"
-                    })
+                    row = {
+                        "Feature": feat, "Local Target": int(round(mv)),
+                        "Proposed Mill Range": f"{int(round(mv - sigma_choice*sv))}-{int(round(mv + sigma_choice*sv))}"
+                    }
+                    thick_status.append(row)
+                    # Lưu vào biến global đã khởi tạo ở đầu app
+                    exp_row = row.copy(); exp_row['Thickness'] = thick
+                    all_export_data.append(exp_row)
 
             st.dataframe(pd.DataFrame(thick_status), use_container_width=True, hide_index=True)
             
-            # --- VẼ BIỂU ĐỒ I-MR ---
+            # Draw I-MR Charts
             cols_imr = st.columns(2)
             top4 = [f for f in ['YS', 'TS', 'EL', 'YPE'] if f in plot_data_dict[thick]]
             for idx, f in enumerate(top4):
@@ -258,30 +236,17 @@ if uploaded_file is not None:
                     v, mv, sv = d['values'], d['mean'], d['std']
                     if len(v) > 1:
                         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 7), gridspec_kw={'height_ratios': [2, 1]})
-                        U, L = mv + sigma_choice*sv, mv - sigma_choice*sv
+                        ucl, lcl = mv + sigma_choice*sv, mv - sigma_choice*sv
+                        ax1.plot(v, marker='o', color='#1f77b4', ms=4, lw=1)
+                        ax1.axhline(mv, color='green', ls='--')
+                        ax1.axhline(ucl, color='red', ls='--'); ax1.axhline(lcl, color='red', ls='--')
+                        ax1.set_title(f"I-Chart: {f} ({thick})")
                         
-                        # I-Chart
-                        ax1.plot(v, marker='o', color='#1f77b4', ms=4, lw=1, zorder=1)
-                        outs = np.where((v > U) | (v < L))[0]
-                        ax1.scatter(outs, v[outs], color='red', s=40, zorder=2, label='Out of Control')
-                        ax1.axhline(mv, color='green', ls='--', lw=1.5)
-                        ax1.axhline(U, color='red', ls='--', lw=1.2)
-                        ax1.axhline(L, color='red', ls='--', lw=1.2)
-                        ax1.set_title(f"I-Chart: {f} (Thick {thick})", fontsize=11, fontweight='bold')
-                        ax1.set_ylabel("Value")
-                        
-                        # MR-Chart
-                        mr = np.abs(np.diff(v))
-                        mrm = np.mean(mr)
-                        mru = 3.267 * mrm
+                        mr = np.abs(np.diff(v)); mrm = np.mean(mr); mru = 3.267 * mrm
                         ax2.plot(mr, marker='o', color='orange', ms=4, lw=1)
-                        ax2.axhline(mrm, color='green', ls='--')
-                        ax2.axhline(mru, color='red', ls='--')
-                        ax2.set_title("Moving Range Chart", fontsize=10)
-                        ax2.set_ylabel("Range")
-                        
-                        fig.tight_layout()
-                        st.pyplot(fig)
+                        ax2.axhline(mrm, color='green', ls='--'); ax2.axhline(mru, color='red', ls='--')
+                        ax2.set_title("Moving Range")
+                        fig.tight_layout(); st.pyplot(fig)
             st.markdown("---")
     # --- EXPORT SECTION ---
     st.sidebar.header("📥 Export Options")
