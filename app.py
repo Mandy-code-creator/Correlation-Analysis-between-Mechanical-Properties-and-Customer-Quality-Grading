@@ -59,7 +59,7 @@ if uploaded_file is not None:
         summary_df = df.groupby('厚度歸類')[count_cols].sum().reset_index()
         summary_df['Total Coils'] = summary_df[count_cols].sum(axis=1)
         for col in count_cols:
-            summary_df[f"% {col}"] = (summary_df[col] / summary_df['Total Coils'] * 100).fillna(0).round(2)
+            summary_df[f"% {col}"] = (summary_df[col] / summary_df['Total Data'] * 100).fillna(0).round(2)
         display_df = summary_df.copy()
         display_df.rename(columns={'厚度歸類': 'Thickness'}, inplace=True)
         display_df.insert(0, 'No.', range(1, len(display_df) + 1))
