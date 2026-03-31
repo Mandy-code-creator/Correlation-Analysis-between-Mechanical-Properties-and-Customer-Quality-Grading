@@ -42,7 +42,7 @@ if uploaded_file is not None:
         "3. PRODUCTION CONTROL LIMITS (EXECUTIVE VIEW)"
     ])
 
-    # --- TAB 1: SUMMARY (Keep 2 decimals) ---
+    # --- TAB 1: SUMMARY ---
     with tab1:
         st.header("1. Quality Summary by Thickness")
         summary_df = df.groupby('厚度歸類')[count_cols].sum().reset_index()
@@ -58,7 +58,7 @@ if uploaded_file is not None:
                 display_df[c] = display_df[c].astype(int)
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-    # --- TAB 2: DISTRIBUTION ANALYSIS ---
+    # --- TAB 2: DISTRIBUTION ---
     with tab2:
         st.header("2. Distribution Analysis")
         grade_mapping = {'A+B+': 'A+B+數', 'A-B+': 'A-B+數', 'A-B': 'A-B數', 'A-B-': 'A-B-數', 'B+': 'B+數'}
@@ -69,6 +69,7 @@ if uploaded_file is not None:
             N_t = data['Total_Count'].sum()
             k_b = int(1 + 3.322 * math.log10(N_t)) if N_t > 0 else 10
             k_b = max(k_b, 5)
+            mean_inf = []
             for (label, col_n), color in zip(grade_mapping.items(), colors):
                 temp_d = data[[feat, col_n]].dropna()
                 temp_d = temp_d[temp_d[col_n] > 0]
@@ -82,28 +83,36 @@ if uploaded_file is not None:
                         x_range_d = np.linspace(m_d - 4*s_d, m_d + 4*s_d, 150)
                         bin_w_d = (vals_d.max() - vals_d.min()) / k_b if vals_d.max() != vals_d.min() else 1
                         ax.plot(x_range_d, stats.norm.pdf(x_range_d, m_d, s_d) * wgts_d.sum() * bin_w_d, color=color, lw=2.5)
+                    ax.axvline(m_d, color=color, ls='--', lw=2)
+                    mean_inf.append({'val': m_d, 'color': color})
+            if mean_inf:
+                mean_inf.sort(key=lambda x: x['val'])
+                y_max_l = ax.get_ylim()[1]
+                for idx_m, info_m in enumerate(mean_inf):
+                    y_p = y_max_l * (0.95 - (idx_m % 4) * 0.08)
+                    ax.text(info_m['val'], y_p, f"{info_m['val']:.0f}", color=info_m['color'], fontweight='bold', ha='center', bbox=dict(facecolor='white', alpha=0.8, edgecolor=info_m['color'], boxstyle='round'))
             ax.set_title(f"{feat} (Thick: {thick})")
             if is_right_col: ax.legend(title="Grade", bbox_to_anchor=(1.05, 1), loc='upper left')
 
         for thickness in thickness_list:
             df_thickness = df[df['厚度歸類'] == thickness]
-            st.markdown(f"### 📏 Thickness: {thickness}")
+            st.markdown(f"## 📏 Thickness: {thickness}")
             col1, col2 = st.columns(2)
             if 'YS' in mech_features:
                 with col1:
-                    fig, ax = plt.subplots(figsize=(10, 4))
+                    fig, ax = plt.subplots(figsize=(10, 5))
                     plot_feature_dist(ax, df_thickness, 'YS', thickness, False)
                     st.pyplot(fig)
             if 'TS' in mech_features:
                 with col2:
-                    fig, ax = plt.subplots(figsize=(10, 4))
+                    fig, ax = plt.subplots(figsize=(10, 5))
                     plot_feature_dist(ax, df_thickness, 'TS', thickness, True)
                     st.pyplot(fig)
 
     # --- TAB 3: EXECUTIVE OPTIMIZATION ---
     with tab3:
         st.header("3. Production Control Limits & Goals")
-        sigma_choice = st.radio("Select Sigma Factor for Mill Range Tolerance", [2.0, 2.5, 3.0], index=0)
+        sigma_choice = st.radio("Select Sigma Factor for Mill Range", [2.0, 2.5, 3.0], index=0)
 
         spec_limits = {"YS": (405, 500), "TS": (415, 550), "EL": (25, None), "YPE": (4, None)}
         thickness_list = sorted(df['厚度歸類'].dropna().unique(), key=str)
@@ -113,8 +122,6 @@ if uploaded_file is not None:
             st.subheader(f"Thickness Category: {thick}")
             df_t = df[df['厚度歸類'] == thick]
             status_list = []
-            
-            # Chỉ lấy dữ liệu từ hàng tốt (A-B và trở lên) để tính toán giải pháp
             good_grades = [c for c in ['A+B+數', 'A-B+數', 'A-B數'] if c in df_t.columns]
 
             for feat in mech_features:
@@ -132,55 +139,49 @@ if uploaded_file is not None:
                     m_v = np.average(vals_good, weights=wgts_good)
                     s_v = np.sqrt(np.average((vals_good - m_v)**2, weights=wgts_good))
                     
-                    # Data-Driven Release Range (3-sigma thực tế của hàng tốt)
+                    # Data-Driven Release (3-sigma)
                     rel_l = max(m_v - 3*s_v, low) if low else m_v - 3*s_v
                     rel_h = min(m_v + 3*s_v, high) if high else m_v + 3*s_v
                     release_range = f"{int(round(rel_l))}–{int(round(rel_h))}" if high else f">={int(round(rel_l))}"
                     
-                    # Target Goal (Mean của hàng tốt)
+                    # Target Goal
                     target_goal = int(round(m_v))
                     
-                    # BIÊN ĐỘ TOLERANCE (Sigma Factor * Sigma)
+                    # Tolerance Value (Sigma Factor * Sigma)
                     tolerance_val = int(round(sigma_choice * s_v))
                     
-                    # Mill Range (Proposed)
+                    # Mill Range
                     mill_l = max(m_v - sigma_choice*s_v, rel_l)
                     mill_h = min(m_v + sigma_choice*s_v, rel_h)
                     mill_range = f"{int(round(mill_l))}–{int(round(mill_h))}" if high else f">={int(round(mill_l))}"
                 else:
                     target_goal, release_range, mill_range, tolerance_val = "N/A", "N/A", "N/A", "N/A"
 
-                # Segment Distribution (Thống kê thực tế 5 cấp độ)
                 seg_total = df_t[count_cols].sum().sum()
                 seg_dist = "N/A"
                 if seg_total > 0:
                     dist_parts = [f"{k.replace('數','')}: {int(round(df_t[k].sum()/seg_total*100))}%" for k in count_cols]
                     seg_dist = ", ".join(dist_parts)
 
-                # --- SẮP XẾP THỨ TỰ CỘT THEO LOGIC MỚI ---
-                row_entry = {
+                # --- SẮP XẾP THỨ TỰ BẢNG LOGIC ---
+                status_list.append({
                     "Feature": feat,
                     "Customer Spec": customer_spec,
-                    "Segment Distribution": seg_dist,
-                    "Data-Driven Release Range": release_range,
+                    "Release Range": release_range,
                     "Target Goal": target_goal,
-                    f"Tolerance (±{sigma_choice}σ)": tolerance_val,
-                    "Mill Range (Proposed)": mill_range
-                }
-                status_list.append(row_entry)
-                
-                export_entry = row_entry.copy()
-                export_entry["Thickness"] = thick
-                all_export_data.append(export_entry)
+                    f"Tolerance (±{sigma_choice}σ)": tolerance_val, # THỂ HIỆN GIÁ TRỊ SIGMA
+                    "Mill Range (Proposed)": mill_range,
+                    "Segment Distribution": seg_dist
+                })
 
             st.dataframe(pd.DataFrame(status_list), use_container_width=True, hide_index=True)
             st.markdown("---")
             
-        # --- EXPORT TO EXCEL ---
-        if all_export_data:
+        # --- EXPORT ---
+        if status_list:
             towrite = io.BytesIO()
-            pd.DataFrame(all_export_data).to_excel(towrite, index=False, engine='openpyxl')
-            st.download_button("📥 Download Final QC Strategy (Excel)", data=towrite.getvalue(), file_name="QC_Final_Strategy.xlsx")
+            pd.DataFrame(all_export_data).to_excel(towrite, index=False)
+            st.download_button("📥 Download Report", data=towrite.getvalue(), file_name="QC_Report.xlsx")
 
 else:
-    st.info("Please upload an Excel file to start.")
+    st.info("Please upload an Excel file.")
