@@ -12,11 +12,10 @@ import os
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="QC Mechanical Properties Optimizer", layout="wide")
 
-st.title("📊 Mechanical Properties & Quality Yield Optimizer (A-B+ Focus)")
+st.title("📊 Mechanical Properties & Quality Yield Optimizer (Standard QC View)")
 st.markdown("---")
 
 # --- 1. FILE UPLOAD ---
-# Dòng này phải nằm sát lề trái
 uploaded_file = st.file_uploader("Upload your Excel data (.xlsx)", type=["xlsx"])
 
 if uploaded_file is not None:
@@ -38,10 +37,19 @@ if uploaded_file is not None:
     for feat in mech_features:
         df[feat] = pd.to_numeric(df[feat], errors='coerce')
 
+    # 1. TÌM GIÁ TRỊ CAO NHẤT TOÀN CỤC ĐỂ ĐỒNG NHẤT THANG ĐO
+    max_counts = []
+    for f in ['YS', 'TS', 'EL', 'YPE']:
+        if f in df.columns:
+            temp_total = df[count_cols].sum(axis=1)
+            max_counts.append(temp_total.max())
+    
+    global_y_limit = max(max_counts) * 1.25 if max_counts else 600
+
     # --- 3. CREATE TABS ---
     tab1, tab2, tab3 = st.tabs([
         "1. Summary & Yields", 
-        "2. Distribution Analysis (A-B+ Focus)",
+        "2. Distribution Analysis (Standard View)",
         "3. PRODUCTION CONTROL LIMITS (EXECUTIVE VIEW)"
     ])
 
@@ -50,40 +58,23 @@ if uploaded_file is not None:
         st.header("1. Quality Summary by Thickness")
         summary_df = df.groupby('厚度歸類')[count_cols].sum().reset_index()
         summary_df['Total Coils'] = summary_df[count_cols].sum(axis=1)
-        
         for col in count_cols:
             summary_df[f"% {col}"] = (summary_df[col] / summary_df['Total Coils'] * 100).fillna(0).round(2)
-            
         display_df = summary_df.copy()
         display_df.rename(columns={'厚度歸類': 'Thickness'}, inplace=True)
         display_df.insert(0, 'No.', range(1, len(display_df) + 1))
-        
         int_cols = [c for c in (count_cols + ['Total Coils', 'No.']) if c in display_df.columns]
         for c in int_cols:
             display_df[c] = display_df[c].astype(int)
-                
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-  # --- TAB 2: DISTRIBUTION (BẢN CÂN ĐỐI TUYỆT ĐỐI) ---
+    # --- TAB 2: DISTRIBUTION (CÂN ĐỐI + NHÃN SO LE) ---
     with tab2:
         st.header("2. Mechanical Properties Distribution Analysis")
         
-        # 1. TÌM GIÁ TRỊ CAO NHẤT TOÀN CỤC ĐỂ ĐỒNG NHẤT THANG ĐO
-        # Chúng ta tính tổng số lượng cuộn (bar height) lớn nhất trong tất cả features
-        max_counts = []
-        for f in ['YS', 'TS', 'EL', 'YPE']:
-            if f in df.columns:
-                # Tính chiều cao cột cao nhất thực tế của feature đó
-                # (Dùng bins=15 làm chuẩn để ước lượng chiều cao tối đa)
-                temp_total = df[count_cols].sum(axis=1)
-                max_counts.append(temp_total.max())
-        
-        # Thang đo chung = Giá trị lớn nhất tìm được + 15% khoảng hở để đặt Label
-        global_y_limit = max(max_counts) * 1.15 if max_counts else 500
-
         def plot_standard_dist(ax, data, feat, title_suffix, is_right_col=False):
             N_t = data['Total_Count'].sum()
-            k_b = 15 # Cố định số bin để các biểu đồ có độ rộng cột đồng nhất
+            k_b = 15 
             color_map = {'A-B+數': '#2ca02c', 'A-B-數': '#ff7f0e', 'B+數': '#d62728', 'B數': '#9467bd', 'A-B數': '#1f77b4'}
             mean_inf = []
             
@@ -93,7 +84,6 @@ if uploaded_file is not None:
                 if len(temp_d) >= 1:
                     vals_d, wgts_d = temp_d[feat].values, temp_d[col_n].values
                     color = color_map.get(col_n, '#7f7f7f')
-                    
                     sns.histplot(x=vals_d, weights=wgts_d, label=col_n.replace('數',''), 
                                  color=color, bins=k_b, stat='count', alpha=0.4, ax=ax, edgecolor='white')
                     
@@ -104,72 +94,54 @@ if uploaded_file is not None:
 
                     if len(vals_d) > 2 and s_d > 0:
                         x_range = np.linspace(m_d - 4*s_d, m_d + 4*s_d, 100)
-                        # Tính bin_width cố định dựa trên range của dữ liệu
                         bin_w = (vals_d.max() - vals_d.min()) / k_b if vals_d.max() != vals_d.min() else 1
                         ax.plot(x_range, stats.norm.pdf(x_range, m_d, s_d) * wgts_d.sum() * bin_w, color=color, lw=2)
 
-            # ĐẶT THANG ĐO CHUNG CHO TẤT CẢ BIỂU ĐỒ
             ax.set_ylim(0, global_y_limit)
 
-            # Hiển thị nhãn Mean (đặt ở vị trí tương đối so với thang đo chung)
             if mean_inf:
                 mean_inf.sort(key=lambda x: x['val'])
+                levels = [0.92, 0.82, 0.72, 0.62] 
                 for i_m, info in enumerate(mean_inf):
-                    y_p = global_y_limit * (0.9 - (i_m % 3) * 0.08)
+                    y_p = global_y_limit * levels[i_m % len(levels)]
                     ax.text(info['val'], y_p, f"{info['val']:.1f}", color=info['color'], 
-                            fontsize=9, fontweight='bold', ha='center',
-                            bbox=dict(facecolor='white', alpha=0.8, edgecolor=info['color'], boxstyle='round,pad=0.1'))
+                            fontsize=8, fontweight='bold', ha='center', va='center',
+                            bbox=dict(facecolor='white', alpha=0.9, edgecolor=info['color'], boxstyle='round,pad=0.2'))
 
             ax.set_title(f"{feat} - {title_suffix}", fontsize=12, fontweight='bold')
             if is_right_col: 
                 ax.legend(title="Grade", bbox_to_anchor=(1.05, 1), loc='upper left')
 
-        # --- PHẦN VẼ (Giữ nguyên cấu trúc gọi hàm) ---
         st.subheader("🌐 Overall Factory Distribution")
         ov_cols = st.columns(2)
         for idx, feat in enumerate(['YS', 'TS', 'EL', 'YPE']):
             if feat in mech_features:
                 with ov_cols[idx % 2]:
                     fig_ov, ax_ov = plt.subplots(figsize=(10, 5))
-                    # --- PHẦN CẬP NHẬT: HIỂN THỊ NHÃN SO LE TRÁNH ĐÈ NHAU ---
-            if mean_inf:
-                # 1. Sắp xếp các nhãn theo giá trị Mean từ nhỏ đến lớn
-                mean_inf.sort(key=lambda x: x['val'])
-                
-                # 2. Định nghĩa các tầng cao thấp (Dùng 4 tầng để giãn tối đa)
-                # Tầng 1 là cao nhất (92%), các tầng sau thấp dần
-                levels = [0.92, 0.82, 0.72, 0.62] 
-                
-                for i_m, info in enumerate(mean_inf):
-                    # Chọn tầng dựa trên số thứ tự
-                    level_idx = i_m % len(levels)
-                    y_p = global_y_limit * levels[level_idx]
-                    
-                    # Vẽ đường kẻ phụ từ nhãn xuống (tùy chọn, giúp dễ nhìn hơn)
-                    # ax.plot([info['val'], info['val']], [y_p, info['val']], color=info['color'], lw=0.5, alpha=0.3)
-                    
-                    # Hiển thị nhãn số với khung trắng bo góc
-                    ax.text(info['val'], y_p, f"{info['val']:.1f}", 
-                            color=info['color'], 
-                            fontsize=8, 
-                            fontweight='bold', 
-                            ha='center', 
-                            va='center',
-                            bbox=dict(facecolor='white', alpha=0.9, edgecolor=info['color'], boxstyle='round,pad=0.2'))
+                    plot_standard_dist(ax_ov, df, feat, "Overall", is_right_col=(idx % 2 != 0))
                     st.pyplot(fig_ov)
-    # --- TAB 3: OPTIMIZATION (Executive View - Based on A-B & Above) ---
+                    fig_ov.savefig(f"overall_{feat}.png", bbox_inches='tight')
+
+        st.markdown("---")
+        st.subheader("🔍 Detailed Distribution per Thickness")
+        thickness_list = sorted(df['厚度歸類'].dropna().unique(), key=lambda x: float(x))
+        for thick in thickness_list:
+            df_thick = df[df['厚度歸類'] == thick]
+            st.markdown(f"### 📏 Thickness: **{thick}**")
+            cols_dist = st.columns(2)
+            for idx, feat in enumerate(['YS', 'TS', 'EL', 'YPE']):
+                if feat in mech_features:
+                    with cols_dist[idx % 2]:
+                        fig, ax = plt.subplots(figsize=(10, 5))
+                        plot_standard_dist(ax, df_thick, feat, f"Thick {thick}", is_right_col=(idx % 2 != 0))
+                        st.pyplot(fig)
+                        fig.savefig(f"dist_{feat}_{thick}.png", bbox_inches='tight')
+
+    # --- TAB 3: OPTIMIZATION ---
     with tab3:
         st.header("3. Production Control Limits & Goals (A-B & Above Focused)")
-        
-        # Lựa chọn hệ số Sigma để tính dải an toàn (Mill Range)
-        sigma_choice = st.radio("Select Sigma Factor for Mill Safety Zone", [2.0, 2.5, 3.0], index=0)
-
-        # Thiết lập giới hạn kiểm soát hiện tại (Current Control Limit)
-        spec_limits = {
-            "YS": (405, 500), "TS": (415, 550), "EL": (25, None), "YPE": (4, None)
-        }
-
-        thickness_list = sorted(df['厚度歸類'].dropna().unique(), key=str)
+        sigma_choice = st.radio("Select Sigma Factor", [2.0, 2.5, 3.0], index=0)
+        spec_limits = {"YS": (405, 500), "TS": (415, 550), "EL": (25, None), "YPE": (4, None)}
         all_export_data = []
         plot_data_dict = {}
 
@@ -178,119 +150,66 @@ if uploaded_file is not None:
             df_t = df[df['厚度歸類'] == thick]
             plot_data_dict[thick] = {}
             status_list = []
-            
-            # XÁC ĐỊNH NHÓM HÀNG TỐT (A-B TRỞ LÊN)
-            good_grade_cols = [c for c in ['A-B+數', 'A-B數'] if c in df_t.columns]
+            good_cols = [c for c in ['A-B+數', 'A-B數'] if c in df_t.columns]
 
             for feat in mech_features:
-                # 1. Lọc dữ liệu: Chỉ lấy những hàng có đặc tính cơ lý VÀ có số lượng hàng tốt > 0
-                if good_grade_cols:
-                    temp_calc = df_t[[feat] + good_grade_cols].dropna(subset=[feat])
-                    temp_calc['Total_Good_Qty'] = temp_calc[good_grade_cols].sum(axis=1)
-                    temp_calc = temp_calc[temp_calc['Total_Good_Qty'] > 0]
-                else:
-                    temp_calc = pd.DataFrame()
-
-                # Lấy chuỗi hiển thị giới hạn (ví dụ: 405-500)
+                temp_calc = df_t[[feat] + good_cols].dropna(subset=[feat]) if good_cols else pd.DataFrame()
+                if not temp_calc.empty:
+                    temp_calc['Good_Qty'] = temp_calc[good_cols].sum(axis=1)
+                    temp_calc = temp_calc[temp_calc['Good_Qty'] > 0]
+                
                 low, high = spec_limits.get(feat, (None, None))
                 spec_str = f"{int(low)}–{int(high)}" if low and high else (f">={int(low)}" if low else "N/A")
 
                 if not temp_calc.empty:
-                    vals_raw = temp_calc[feat].values
-                    wgts_raw = temp_calc['Total_Good_Qty'].values
-                    
-                    # 2. THUẬT TOÁN IQR (Gọt nhiễu để dải số hợp lý hơn)
-                    q1, q3 = np.percentile(vals_raw, 25), np.percentile(vals_raw, 75)
+                    v_f, w_f = temp_calc[feat].values, temp_calc['Good_Qty'].values
+                    q1, q3 = np.percentile(v_f, 25), np.percentile(v_f, 75)
                     iqr = q3 - q1
-                    mask = (vals_raw >= q1 - 1.5*iqr) & (vals_raw <= q3 + 1.5*iqr)
+                    mask = (v_f >= q1 - 1.5*iqr) & (v_f <= q3 + 1.5*iqr)
+                    vf, wf = v_f[mask] if mask.sum() > 0 else v_f, w_f[mask] if mask.sum() > 0 else w_f
+                    m_v = np.average(vf, weights=wf)
+                    s_v = np.sqrt(np.average((vf - m_v)**2, weights=wf))
+                    plot_data_dict[thick][feat] = {'values': vf, 'mean': m_v, 'std': s_v}
                     
-                    v_f = vals_raw[mask] if mask.sum() > 0 else vals_raw
-                    w_f = wgts_raw[mask] if mask.sum() > 0 else wgts_raw
-                    
-                    # 3. TÍNH TOÁN CÁC CHỈ SỐ THỐNG KÊ (CÓ TRỌNG SỐ)
-                    mean_val = np.average(v_f, weights=w_f)
-                    std_val = np.sqrt(np.average((v_f - mean_val)**2, weights=w_f))
-                    
-                    plot_data_dict[thick][feat] = {'values': v_f, 'mean': mean_val, 'std': std_val}
-                    
-                    target_goal = int(round(mean_val))
-                    release_range = f"{int(round(mean_val - 3*std_val))}–{int(round(mean_val + 3*std_val))}"
-                    mill_range = f"{int(round(mean_val - sigma_choice*std_val))}–{int(round(mean_val + sigma_choice*std_val))}"
-                    tolerance_val = int(round(sigma_choice * std_val))
+                    target = int(round(m_v))
+                    rel_range = f"{int(round(m_v - 3*s_v))}–{int(round(m_v + 3*s_v))}"
+                    mill_range = f"{int(round(m_v - sigma_choice*s_v))}–{int(round(m_v + sigma_choice*s_v))}"
+                    tol = int(round(sigma_choice * s_v))
                 else:
-                    target_goal, release_range, mill_range, tolerance_val = "N/A", "N/A", "N/A", "N/A"
-                    mean_val, std_val = 0, 0 
+                    target, rel_range, mill_range, tol, m_v, s_v = "N/A", "N/A", "N/A", "N/A", 0, 0
 
-                # Tính toán phân bổ phần trăm các cấp độ (Segment Distribution)
-                seg_total = df_t[count_cols].sum().sum()
-                seg_dist = ", ".join([f"{k.replace('數','')}:{int(round(df_t[k].sum()/seg_total*100))}%" for k in count_cols]) if seg_total > 0 else "N/A"
+                total_n = df_t[count_cols].sum().sum()
+                seg_dist = ", ".join([f"{k.replace('數','')}:{int(round(df_t[k].sum()/total_n*100))}%" for k in count_cols]) if total_n > 0 else "N/A"
 
-                # 4. TỔNG HỢP DỮ LIỆU DÒNG (ĐÃ BỎ STATUS)
-                row_data = {
-                    "Feature": feat,
-                    "Current Control Limit": spec_str,
-                    "Segment Distribution": seg_dist,
-                    "Data-Driven Release Range": release_range,
-                    "Target Goal": target_goal,
-                    f"Tolerance (±{sigma_choice}σ)": tolerance_val, 
-                    "Mill Range (Proposed)": mill_range
-                }
-                
-                status_list.append(row_data)
-                export_row = row_data.copy()
-                export_row['Thickness'] = thick
-                all_export_data.append(export_row)
+                row = {"Feature": feat, "Current Control Limit": spec_str, "Segment Distribution": seg_dist,
+                       "Data-Driven Release Range": rel_range, "Target Goal": target,
+                       f"Tolerance (±{sigma_choice}σ)": tol, "Mill Range (Proposed)": mill_range}
+                status_list.append(row)
+                export_row = row.copy(); export_row['Thickness'] = thick; all_export_data.append(export_row)
 
-            # Hiển thị bảng số liệu tối ưu
-            if status_list:
-                st.dataframe(pd.DataFrame(status_list), use_container_width=True, hide_index=True)
-
-            # --- 5. VẼ BIỂU ĐỒ I-MR (DÀN TRANG 2x2 TRÊN WEB) ---
-            top_4_feats = [f for f in ['YS', 'TS', 'EL', 'YPE'] if f in plot_data_dict[thick]]
+            st.dataframe(pd.DataFrame(status_list), use_container_width=True, hide_index=True)
             cols_imr = st.columns(2)
-            
-            for idx, feat in enumerate(top_4_feats):
+            top4 = [f for f in ['YS', 'TS', 'EL', 'YPE'] if f in plot_data_dict[thick]]
+            for idx, f in enumerate(top4):
                 with cols_imr[idx % 2]:
-                    d = plot_data_dict[thick][feat]
-                    v, m_v, s_v = d['values'], d['mean'], d['std']
-                    
+                    d = plot_data_dict[thick][f]
+                    v, mv, sv = d['values'], d['mean'], d['std']
                     if len(v) > 1:
                         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 7))
-                        U, L = m_v + sigma_choice*s_v, m_v - sigma_choice*s_v
-                        
-                        # Individuals Chart + Tô đỏ Outliers
-                        ax1.plot(v, marker='o', color='blue', markersize=3, lw=1, zorder=1)
-                        out_idx = np.where((v > U) | (v < L))[0]
-                        ax1.scatter(out_idx, v[out_idx], color='red', s=30, zorder=2)
-                        ax1.axhline(m_v, color='green', ls='--', label=f'Mean: {target_goal}')
-                        ax1.axhline(U, color='red', ls='--', label=f'UCL: {int(round(U))}')
-                        ax1.axhline(L, color='red', ls='--', label=f'LCL: {int(round(L))}')
-                        ax1.set_title(f"I-Chart: {feat} (Thick: {thick})")
-                        ax1.legend(loc='upper right', fontsize=7)
-                        
-                        # Moving Range Chart + Tô đỏ Outliers
-                        MR = np.abs(np.diff(v))
-                        MR_m = np.mean(MR)
-                        MR_U = 3.267 * MR_m
-                        ax2.plot(MR, marker='o', color='orange', markersize=3, lw=1, zorder=1)
-                        mr_out = np.where(MR > MR_U)[0]
-                        ax2.scatter(mr_out, MR[mr_out], color='red', s=30, zorder=2)
-                        ax2.axhline(MR_m, color='green', ls='--')
-                        ax2.axhline(MR_U, color='red', ls='--')
+                        U, L = mv + sigma_choice*sv, mv - sigma_choice*sv
+                        ax1.plot(v, marker='o', color='blue', ms=3, lw=1)
+                        outs = np.where((v > U) | (v < L))[0]
+                        ax1.scatter(outs, v[outs], color='red', s=30)
+                        ax1.axhline(mv, color='green', ls='--')
+                        ax1.axhline(U, color='red', ls='--'); ax1.axhline(L, color='red', ls='--')
+                        ax1.set_title(f"I-Chart: {f}")
+                        mr = np.abs(np.diff(v)); mrm = np.mean(mr); mru = 3.267 * mrm
+                        ax2.plot(mr, marker='o', color='orange', ms=3, lw=1)
+                        ax2.axhline(mrm, color='green', ls='--'); ax2.axhline(mru, color='red', ls='--')
                         ax2.set_title("Moving Range Chart")
-                        
-                        fig.tight_layout()
-                        st.pyplot(fig)
-                        fig.savefig(f"imr_{feat}_{thick}.png", bbox_inches='tight')
-            st.markdown("---")
+                        fig.tight_layout(); st.pyplot(fig)
+                        fig.savefig(f"imr_{f}_{thick}.png", bbox_inches='tight')
 
-        # Nút tải Excel (Dữ liệu đã gộp A-B trở lên)
-        if all_export_data:
-            st.markdown("### 📥 Download Final QC Report (Excel)")
-            towrite = io.BytesIO()
-            pd.DataFrame(all_export_data).to_excel(towrite, index=False, engine='openpyxl')
-            towrite.seek(0)
-            st.download_button(label="📥 Download Excel Report", data=towrite, file_name="QC_Mill_Range_Report.xlsx")
     # --- PDF EXPORT ---
     st.markdown("### 🖨️ Export PDF Executive Report")
     def clean(t): return str(t).replace('±', '+/-').replace('–', '-').encode('latin-1', 'ignore').decode('latin-1')
@@ -304,9 +223,7 @@ if uploaded_file is not None:
         for i, col in enumerate(display_df.columns): pdf.cell(cw[i] if i < len(cw) else 20, 8, clean(col), border=1, align='C')
         pdf.ln(); pdf.set_font('Arial', '', 8)
         for _, r in display_df.iterrows():
-            for i, v in enumerate(r):
-                if isinstance(v, (int, float)) and v == int(v): v = int(v)
-                pdf.cell(cw[i] if i < len(cw) else 20, 8, clean(v), border=1, align='C')
+            for i, v in enumerate(r): pdf.cell(cw[i] if i < len(cw) else 20, 8, clean(v), border=1, align='C')
             pdf.ln()
 
         for thick in thickness_list:
