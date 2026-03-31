@@ -11,10 +11,6 @@ import io
 st.set_page_config(page_title="QC Mechanical Properties Optimizer", layout="wide")
 
 st.title("📊 Mechanical Properties & Quality Yield Optimizer")
-st.markdown("""
-This system identifies the **Safe Operating Window** for mechanical properties, 
-specifically addressing cases where a single coil produces multiple quality grades.
-""")
 st.markdown("---")
 
 # --- 1. FILE UPLOAD ---
@@ -43,17 +39,17 @@ if uploaded_file is not None:
     tab1, tab2, tab3 = st.tabs([
         "1. Summary & Yields", 
         "2. Distribution Analysis (Parallel View)",
-        "3. SAFE WINDOW OPTIMIZATION & EXPORT"
+        "3. PRODUCTION CONTROL LIMITS (EXECUTIVE VIEW)"
     ])
 
-    # --- TAB 1: SUMMARY ---
+    # --- TAB 1: SUMMARY (Keep 2 decimals for %) ---
     with tab1:
         st.header("1. Quality Summary by Thickness")
         summary_df = df.groupby('厚度歸類')[count_cols].sum().reset_index()
         summary_df['Total Coils'] = summary_df[count_cols].sum(axis=1)
         
         for col in count_cols:
-            # Đổi round(0) thành round(2) và xóa .astype(int)
+            # GIỮ LẠI 2 CHỮ SỐ THẬP PHÂN THEO YÊU CẦU
             summary_df[f"% {col}"] = (summary_df[col] / summary_df['Total Coils'] * 100).fillna(0).round(2)
             
         display_df = summary_df.copy()
@@ -67,7 +63,7 @@ if uploaded_file is not None:
                 
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-    # --- TAB 2: DISTRIBUTION (PARALLEL VIEW) ---
+    # --- TAB 2: DISTRIBUTION ---
     with tab2:
         st.header("2. Distribution Analysis (Parallel Clear View)")
         grade_mapping = {'A+B+': 'A+B+數', 'A-B+': 'A-B+數', 'A-B': 'A-B數', 'A-B-': 'A-B-數', 'B+': 'B+數'}
@@ -85,10 +81,8 @@ if uploaded_file is not None:
                 temp_d = temp_d[temp_d[col_n] > 0]
                 if len(temp_d) > 2:
                     vals_d, wgts_d = temp_d[feat].values, temp_d[col_n].values
-                    
                     sns.histplot(x=vals_d, weights=wgts_d, label=label, color=color, bins=k_b, 
                                  stat='count', alpha=0.45, ax=ax, edgecolor='white', linewidth=0.5)
-                    
                     m_d = np.average(vals_d, weights=wgts_d)
                     s_d = np.sqrt(np.average((vals_d - m_d)**2, weights=wgts_d))
                     if s_d > 0:
@@ -123,7 +117,6 @@ if uploaded_file is not None:
         for thickness in thickness_list:
             df_thickness = df[df['厚度歸類'] == thickness]
             st.markdown(f"## 📏 Analysis for Thickness: **{thickness}**")
-            
             col_ys, col_ts = st.columns(2)
             if 'YS' in mech_features:
                 with col_ys:
@@ -135,24 +128,12 @@ if uploaded_file is not None:
                     fig_ts, ax_ts = plt.subplots(figsize=(10, 5))
                     plot_feature_dist(ax_ts, df_thickness, 'TS', thickness, is_right_col=True)
                     st.pyplot(fig_ts)
-
-            col_el, col_ype = st.columns(2)
-            if 'EL' in mech_features:
-                with col_el:
-                    fig_el, ax_el = plt.subplots(figsize=(10, 5))
-                    plot_feature_dist(ax_el, df_thickness, 'EL', thickness, is_right_col=False)
-                    st.pyplot(fig_el)
-            if 'YPE' in mech_features:
-                with col_ype:
-                    fig_ype, ax_ype = plt.subplots(figsize=(10, 5))
-                    plot_feature_dist(ax_ype, df_thickness, 'YPE', thickness, is_right_col=True)
-                    st.pyplot(fig_ype)
             st.markdown("---")
 
-    # --- TAB 3: SAFE WINDOW OPTIMIZATION & EXPORT ---
+    # --- TAB 3: OPTIMIZATION (Mill Range & Release Range) ---
     with tab3:
-        st.header("3. Safe Operating Window by Thickness (with I-MR & Export)")
-        sigma_factor = st.radio("Select Sigma Factor", [1.0,2.0, 2.5, 3.0], index=0)
+        st.header("3. Production Control Limits & Goals")
+        sigma_factor = st.radio("Select Sigma Factor for Safety Zone", [2.0, 2.5, 3.0], index=0)
 
         spec_limits = {
             "YS": (405, 500), "TS": (415, 550), "EL": (25, None), "YPE": (4, None)
@@ -176,59 +157,57 @@ if uploaded_file is not None:
 
                 mean_val = np.mean(vals_clean)
                 std_val = np.std(vals_clean, ddof=1)
-                safe_val = mean_val - sigma_factor*std_val
-                low, high = spec_limits.get(feat, (None, None))
-
-                if low is not None and high is not None:
-                    spec_str = f"{int(low)}–{int(high)}"
-                    ctrl_low = int(round(low + 0.05*(high-low)))
-                    ctrl_high = int(round(high - 0.05*(high-low)))
-                    ctrl_limit = f"{ctrl_low}–{ctrl_high}"
-                elif low is not None:
-                    spec_str = f">={int(low)}"
-                    ctrl_limit = f">={int(round(low + (0.05*low)))}"
-                else:
-                    spec_str = "N/A"
-                    ctrl_limit = "N/A"
-
+                
+                # I-MR Limits
                 UCL_I = mean_val + sigma_factor*std_val
                 LCL_I = mean_val - sigma_factor*std_val
-                ctrl_imr = f"{int(round(LCL_I))}–{int(round(UCL_I))}"
+                
+                low, high = spec_limits.get(feat, (None, None))
+
+                # --- CALCULATE MILL RANGE, RELEASE RANGE, TARGET GOAL ---
+                if low is not None and high is not None:
+                    release_range = f"{int(low)}–{int(high)}"
+                    theo_low = low + 0.05*(high-low)
+                    theo_high = high - 0.05*(high-low)
+                    
+                    # Mill Range logic: Intersection of Safe Spec and Capability
+                    prac_low = max(theo_low, LCL_I)
+                    prac_high = min(theo_high, UCL_I)
+                    
+                    if prac_low > prac_high: prac_low, prac_high = theo_low, theo_high
+                        
+                    mill_range = f"{int(round(prac_low))}–{int(round(prac_high))}"
+                    target_goal = int(round((prac_low + prac_high) / 2))
+                    
+                elif low is not None:
+                    release_range = f">={int(low)}"
+                    theo_low = low + 0.05*low
+                    prac_low = max(theo_low, LCL_I)
+                    mill_range = f">={int(round(prac_low))}"
+                    target_goal = int(round(prac_low + 5)) # Đề xuất nhích thêm 5 đơn vị
+                else:
+                    release_range = "N/A"
+                    mill_range = "N/A"
+                    target_goal = "N/A"
 
                 seg_A_Bplusplus = df_t['A+B+數'].sum()
                 seg_A_Bplus = df_t['A-B+數'].sum()
-                seg_A_B = df_t['A-B數'].sum()
-                seg_A_Bminus = df_t['A-B-數'].sum()
-                seg_Bplus = df_t['B+數'].sum()
-                seg_total = seg_A_Bplusplus + seg_A_Bplus + seg_A_B + seg_A_Bminus + seg_Bplus
+                seg_total = df_t[count_cols].sum().sum()
 
                 if seg_total > 0:
-                    seg_dist = (
-                        f"A+B+: {int(round(seg_A_Bplusplus/seg_total*100))}%, "
-                        f"A-B+: {int(round(seg_A_Bplus/seg_total*100))}%, "
-                        f"A-B: {int(round(seg_A_B/seg_total*100))}%, "
-                        f"A-B-: {int(round(seg_A_Bminus/seg_total*100))}%, "
-                        f"B+: {int(round(seg_Bplus/seg_total*100))}%"
-                    )
+                    seg_dist = (f"A-B+ & Above: {int(round((seg_A_Bplusplus+seg_A_Bplus)/seg_total*100))}%")
                 else:
                     seg_dist = "N/A"
-
-                status = "✅ Safe"
-                if low is not None and safe_val < low:
-                    status = "⚠ Risk (below limit)"
-                if high is not None and safe_val > high:
-                    status = "⚠ Risk (above limit)"
 
                 row_data = {
                     "Thickness": thick,
                     "Feature": feat,
-                    "Spec Limit": spec_str,
-                    "Segment Distribution": seg_dist,
-                    "Measured Mean": int(round(mean_val)),
-                    "I-MR Control Limit": ctrl_imr,
-                    f"Safe Zone (Mean - {sigma_factor}σ)": int(round(safe_val)),
-                    "Status": status,
-                    "Safe Spec Tolerance (±5%)": ctrl_limit
+                    "Release Range (Spec)": release_range,
+                    "Segment Yield (A-B+)": seg_dist,
+                    "Target Goal": target_goal,
+                    "Mill Range (Proposed)": mill_range,
+                    "Current Capability (I-MR)": f"{int(round(LCL_I))}–{int(round(UCL_I))}",
+                    "Status": "✅ Safe" if (low is None or (mean_val - sigma_factor*std_val) >= low) else "⚠ Risk"
                 }
                 
                 status_list.append(row_data)
@@ -239,59 +218,39 @@ if uploaded_file is not None:
                 display_df_3 = display_df_3.drop(columns=['Thickness'])
             st.dataframe(display_df_3, use_container_width=True, hide_index=True)
 
-            # --- I-MR Chart ---
+            # --- I-MR Charts with Tight Layout ---
             for feat in mech_features:
-                st.markdown(f"#### I-MR Chart: {feat}")
                 v = df_t[feat].dropna().values
                 if len(v) > 1:
-                    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 6))
+                    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 7))
                     m_v, s_v = np.mean(v), np.std(v, ddof=1)
                     U, L = m_v + sigma_factor*s_v, m_v - sigma_factor*s_v
                     
-                    m_v_int = int(round(m_v))
-                    U_int = int(round(U))
-                    L_int = int(round(L))
-
-                    ax1.plot(v, marker='o', color='blue')
-                    ax1.axhline(m_v, color='green', ls='--', label=f'Mean: {m_v_int}')
-                    ax1.axhline(U, color='red', ls='--', label=f'UCL (Max): {U_int}')
-                    ax1.axhline(L, color='red', ls='--', label=f'LCL (Min): {L_int}')
-                    
-                    ax1.set_title(f"Individuals Chart for {feat}")
-                    ax1.legend(loc='upper right')
+                    ax1.plot(v, marker='o', color='blue', markersize=4)
+                    ax1.axhline(m_v, color='green', ls='--', label=f'Mean: {int(round(m_v))}')
+                    ax1.axhline(U, color='red', ls='--', label=f'UCL: {int(round(U))}')
+                    ax1.axhline(L, color='red', ls='--', label=f'LCL: {int(round(L))}')
+                    ax1.set_title(f"Individuals Chart: {feat}")
+                    ax1.legend(loc='upper right', fontsize=8)
                     
                     MR = np.abs(np.diff(v))
-                    MR_mean = np.mean(MR)
-                    d3, d4 = 0, 3.267
-                    UCL_MR = d4 * MR_mean
-                    LCL_MR = d3 * MR_mean
+                    ax2.plot(MR, marker='o', color='orange', markersize=4)
+                    ax2.axhline(np.mean(MR), color='green', ls='--', label=f'MR Mean: {int(round(np.mean(MR)))}')
+                    ax2.set_title("Moving Range Chart")
+                    ax2.legend(loc='upper right', fontsize=8)
                     
-                    MR_mean_int = int(round(MR_mean))
-                    UCL_MR_int = int(round(UCL_MR))
-                    LCL_MR_int = int(round(LCL_MR))
-                    
-                    ax2.plot(MR, marker='o', color='orange')
-                    ax2.axhline(MR_mean, color='green', ls='--', label=f'MR Mean: {MR_mean_int}')
-                    ax2.axhline(UCL_MR, color='red', ls='--', label=f'UCL MR: {UCL_MR_int}')
-                    ax2.axhline(LCL_MR, color='red', ls='--', label=f'LCL MR: {LCL_MR_int}')
-                    
-                    ax2.set_title(f"Moving Range Chart for {feat}")
-                    ax2.legend(loc='upper right')
-                    
-                    # THÊM LỆNH GIÃN CÁCH TỰ ĐỘNG Ở ĐÂY
-                    fig.tight_layout(pad=2.0)
-                    
+                    # GIÃN CÁCH BIỂU ĐỒ TRÁNH ĐÈ TIÊU ĐỀ
+                    fig.tight_layout(pad=3.0)
                     st.pyplot(fig)
             st.markdown("---")
 
         # --- EXPORT FINAL ---
         if all_export_data:
-            st.markdown("### 📥 Export Final Proposed Control Limits")
+            st.markdown("### 📥 Download Final QC Report")
             towrite = io.BytesIO()
             pd.DataFrame(all_export_data).to_excel(towrite, index=False, engine='openpyxl')
             towrite.seek(0)
-            st.download_button(label="📥 Download Summary Report (Excel)", data=towrite, 
-                               file_name="QC_Proposed_Control_Limits.xlsx")
-
+            st.download_button(label="📥 Download Executive Report (Excel)", data=towrite, 
+                               file_name="QC_Mill_Range_Report.xlsx")
 else:
     st.info("Please upload an Excel file.")
