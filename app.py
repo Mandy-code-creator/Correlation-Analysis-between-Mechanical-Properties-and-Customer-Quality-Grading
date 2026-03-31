@@ -377,7 +377,7 @@ if uploaded_file is not None:
                 
                 pdf.set_font('Arial', 'B', 8)
                 headers = ["Feature", "Standard", "Segment Distribution", "Release Range", "Target", f"Tol(+/-{sigma_choice})", "Mill Range", "Status"]
-                col_widths_3 = [15, 25, 75, 35, 15, 20, 35, 20] 
+                col_widths_3 = [22, 23, 75, 32, 15, 20, 33, 20] 
                 
                 for i, head in enumerate(headers):
                     pdf.cell(col_widths_3[i], 8, head, border=1, align='C')
