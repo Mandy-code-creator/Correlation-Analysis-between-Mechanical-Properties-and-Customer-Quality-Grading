@@ -44,12 +44,9 @@ if uploaded_file is not None:
         "3. PRODUCTION CONTROL LIMITS (EXECUTIVE VIEW)"
     ])
 
-    # =========================
-    # TAB 1
-    # =========================
+    # --- TAB 1 ---
     with tab1:
         st.header("1. Quality Summary by Thickness")
-
         summary_df = df.groupby('厚度歸類')[count_cols].sum().reset_index()
         summary_df['Total Coils'] = summary_df[count_cols].sum(axis=1)
         
@@ -66,21 +63,10 @@ if uploaded_file is not None:
                 
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-    # =========================
-    # TAB 2
-    # =========================
+    # --- TAB 2 (GIỮ NGUYÊN) ---
     with tab2:
         st.header("2. Distribution Analysis (A-B+ vs Others)")
-
-        # ✅ FIX COLOR MAP
-        color_map = {
-            'A-B+數': '#2ca02c',
-            'A-B數': '#1f77b4',
-            'A-B-數': '#ff7f0e',
-            'B+數': '#d62728',
-            'B數': '#9467bd'
-        }
-
+        color_map = {'A-B+': '#2ca02c', 'A-B-': '#ff7f0e', 'B+': '#d62728', 'B': '#9467bd'}
         thickness_list = sorted(df['厚度歸類'].dropna().unique(), key=str)
 
         def plot_feature_dist(ax, data, feat, thick, is_right_col=False):
@@ -94,17 +80,8 @@ if uploaded_file is not None:
                     vals_d, wgts_d = temp_d[feat].values, temp_d[col_n].values
                     color = color_map.get(col_n, '#1f77b4')
                     
-                    sns.histplot(
-                        x=vals_d,
-                        weights=wgts_d,
-                        label=col_n,
-                        color=color,
-                        bins=k_b, 
-                        stat='count',
-                        alpha=0.4,
-                        ax=ax,
-                        edgecolor='white'
-                    )
+                    sns.histplot(x=vals_d, weights=wgts_d, label=col_n, color=color, bins=k_b, 
+                                 stat='count', alpha=0.4, ax=ax, edgecolor='white')
                     
                     if len(vals_d) > 2:
                         m_d = np.average(vals_d, weights=wgts_d)
@@ -112,22 +89,16 @@ if uploaded_file is not None:
                         if s_d > 0:
                             x_range = np.linspace(m_d - 4*s_d, m_d + 4*s_d, 100)
                             bin_w = (vals_d.max() - vals_d.min()) / k_b if vals_d.max() != vals_d.min() else 1
-                            ax.plot(
-                                x_range,
-                                stats.norm.pdf(x_range, m_d, s_d) * wgts_d.sum() * bin_w,
-                                color=color,
-                                lw=2
-                            )
+                            ax.plot(x_range, stats.norm.pdf(x_range, m_d, s_d) * wgts_d.sum() * bin_w, color=color, lw=2)
 
             ax.set_title(f"{feat} - Thick: {thick}")
-            if is_right_col:
+            if is_right_col: 
                 ax.legend(title="Grade", bbox_to_anchor=(1.05, 1), loc='upper left')
 
         for thickness in thickness_list:
             df_thickness = df[df['厚度歸類'] == thickness]
             st.markdown(f"### 📏 Analysis for Thickness: **{thickness}**")
             cols_dist = st.columns(2)
-
             for idx, feat in enumerate(['YS', 'TS', 'EL', 'YPE']):
                 if feat in mech_features:
                     with cols_dist[idx % 2]:
@@ -135,21 +106,15 @@ if uploaded_file is not None:
                         plot_feature_dist(ax, df_thickness, feat, thickness, is_right_col=(idx % 2 != 0))
                         st.pyplot(fig)
                         fig.savefig(f"dist_{feat}_{thickness}.png", bbox_inches='tight')
-
             st.markdown("---")
 
-    # =========================
-    # TAB 3
-    # =========================
+    # --- TAB 3 ---
     with tab3:
         st.header("3. Production Control Limits & Goals (Based on A-B+ Data)")
-
         sigma_choice = st.radio("Select Sigma Factor", [2.0, 2.5, 3.0], index=0)
         spec_limits = {"YS": (405, 500), "TS": (415, 550), "EL": (25, None), "YPE": (4, None)}
         all_export_data = []
         plot_data_dict = {}
-
-        thickness_list = sorted(df['厚度歸類'].dropna().unique(), key=str)
 
         for thick in thickness_list:
             st.subheader(f"Thickness Category: {thick}")
@@ -157,6 +122,7 @@ if uploaded_file is not None:
             plot_data_dict[thick] = {}
             status_list = []
             
+            # ✅ FIX LỖI CỘT
             target_grade = 'A-B+數' if 'A-B+數' in df_t.columns else None
 
             for feat in mech_features:
@@ -184,29 +150,3 @@ if uploaded_file is not None:
                     s_val = np.sqrt(np.average((v_f - m_val)**2, weights=w_f))
                     
                     plot_data_dict[thick][feat] = {'values': v_f, 'mean': m_val, 'std': s_val}
-                    t_goal = int(round(m_val))
-                    rel_range = f"{int(round(m_val - 3*s_val))}–{int(round(m_val + 3*s_val))}"
-                    m_range = f"{int(round(m_val - sigma_choice*s_val))}–{int(round(m_val + sigma_choice*s_val))}"
-                    tol_val = int(round(sigma_choice * s_val))
-                else:
-                    t_goal, rel_range, m_range, tol_val, m_val, s_val = "N/A", "N/A", "N/A", "N/A", 0, 0
-
-                total_n = df_t[count_cols].sum().sum()
-                seg_dist = ", ".join([f"{k}:{int(round(df_t[k].sum()/total_n*100))}%" for k in count_cols]) if total_n > 0 else "N/A"
-
-                row = {
-                    "Feature": feat,
-                    "Current Control Limit": spec_str,
-                    "Segment Distribution": seg_dist,
-                    "Data-Driven Release Range": rel_range,
-                    "Target Goal": t_goal,
-                    f"Tolerance (±{sigma_choice}σ)": tol_val,
-                    "Mill Range (Proposed)": m_range
-                }
-
-                status_list.append(row)
-                export_row = row.copy()
-                export_row['Thickness'] = thick
-                all_export_data.append(export_row)
-
-            st.dataframe(pd.DataFrame(status_list), use_container_width=True, hide_index=True)
