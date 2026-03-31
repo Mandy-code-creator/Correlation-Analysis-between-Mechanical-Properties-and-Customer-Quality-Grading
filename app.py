@@ -16,56 +16,61 @@ st.title("📊 Mechanical Properties & Quality Yield Optimizer (Grade: A-B+ Focu
 st.markdown("---")
 
 # --- 1. FILE UPLOAD ---
-uploaded_file = st.file_uploader("Upload your Excel data (.xlsx)", type=["xlsx"])
+    uploaded_file = st.file_uploader("Upload your Excel data (.xlsx)", type=["xlsx"])
 
-if uploaded_file is not None:
-    df = pd.read_excel(uploaded_file)
-    df.columns = df.columns.str.strip() 
+    if uploaded_file is not None:
+        df = pd.read_excel(uploaded_file)
+        df.columns = df.columns.str.strip() 
 
-    # --- 2. DATA PREPROCESSING (LẤY ĐÚNG CÁC CỘT CÓ CHỮ 數) ---
-    # Đây là các cột chứa con số thực tế trong file Excel của bạn
-    count_cols = ['A-B+數', 'A-B數', 'A-B-數', 'B+數', 'B數']
-    
-    # Kiểm tra và chỉ lấy những cột thực sự tồn tại
-    count_cols = [col for col in count_cols if col in df.columns]
-    
-    for col in count_cols:
-        # Ép kiểu về số, nếu ô trống thì coi như bằng 0
-        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-
-    # Các cột đặc tính cơ lý để phân tích (lấy từ các cột YS, TS, EL... tương ứng)
-    mech_features = ['YS', 'TS', 'EL', 'YPE', 'HARDNESS']
-    mech_features = [feat for feat in mech_features if feat in df.columns]
-
-    # --- 3. CREATE TABS ---
-    tab1, tab2, tab3 = st.tabs([
-        "1. Summary & Yields", 
-        "2. Distribution Analysis (A-B+ Focus)",
-        "3. PRODUCTION CONTROL LIMITS (EXECUTIVE VIEW)"
-    ])
-
-    # --- TAB 1: SUMMARY (Khớp 100% với tính tay) ---
-    with tab1:
-        st.header("1. Quality Summary by Thickness")
-        # Gom nhóm và cộng tổng theo đúng các cột Mandy có
-        summary_df = df.groupby('厚度歸類')[count_cols].sum().reset_index()
-        summary_df['Total Coils'] = summary_df[count_cols].sum(axis=1)
+        # --- 2. DATA PREPROCESSING (LẤY ĐÚNG CÁC CỘT CÓ CHỮ 數) ---
+        # Đây là các cột chứa con số thực tế trong file Excel của bạn
+        count_cols = ['A-B+數', 'A-B數', 'A-B-數', 'B+數', 'B數']
         
-        # Tính tỷ lệ % cho từng loại
+        # Kiểm tra và chỉ lấy những cột thực sự tồn tại
+        count_cols = [col for col in count_cols if col in df.columns]
+        
         for col in count_cols:
-            summary_df[f"% {col}"] = (summary_df[col] / summary_df['Total Coils'] * 100).fillna(0).round(2)
-            
-        display_df = summary_df.copy()
-        display_df.rename(columns={'厚度歸類': 'Thickness'}, inplace=True)
-        display_df.insert(0, 'No.', range(1, len(display_df) + 1))
-        
-        # Ép kiểu số nguyên để mất cái đuôi .0
-        int_cols = [c for c in (count_cols + ['Total Coils', 'No.']) if c in display_df.columns]
-        for c in int_cols:
-            display_df[c] = display_df[c].astype(int)
-                
-        st.dataframe(display_df, use_container_width=True, hide_index=True)
+            # Ép kiểu về số, nếu ô trống thì coi như bằng 0
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
+        # --- DÒNG QUAN TRỌNG: SỬA LỖI KEYERROR ---
+        # Tính tổng số lượng cuộn cho từng hàng dựa trên các cột có chữ 數
+        df['Total_Count'] = df[count_cols].sum(axis=1)
+
+        # Các cột đặc tính cơ lý để phân tích
+        mech_features = ['YS', 'TS', 'EL', 'YPE', 'HARDNESS']
+        mech_features = [feat for feat in mech_features if feat in df.columns]
+        for feat in mech_features:
+            df[feat] = pd.to_numeric(df[feat], errors='coerce')
+
+        # --- 3. CREATE TABS ---
+        tab1, tab2, tab3 = st.tabs([
+            "1. Summary & Yields", 
+            "2. Distribution Analysis (A-B+ Focus)",
+            "3. PRODUCTION CONTROL LIMITS (EXECUTIVE VIEW)"
+        ])
+
+        # --- TAB 1: SUMMARY (Khớp 100% với tính tay) ---
+        with tab1:
+            st.header("1. Quality Summary by Thickness")
+            # Gom nhóm và cộng tổng theo đúng các cột có chữ 數
+            summary_df = df.groupby('厚度歸類')[count_cols].sum().reset_index()
+            summary_df['Total Coils'] = summary_df[count_cols].sum(axis=1)
+            
+            # Tính tỷ lệ % cho từng loại
+            for col in count_cols:
+                summary_df[f"% {col}"] = (summary_df[col] / summary_df['Total Coils'] * 100).fillna(0).round(2)
+                
+            display_df = summary_df.copy()
+            display_df.rename(columns={'厚度歸類': 'Thickness'}, inplace=True)
+            display_df.insert(0, 'No.', range(1, len(display_df) + 1))
+            
+            # Ép kiểu số nguyên để mất cái đuôi .0 (No., Số lượng cuộn, Tổng cuộn)
+            int_cols = [c for c in (count_cols + ['Total Coils', 'No.']) if c in display_df.columns]
+            for c in int_cols:
+                display_df[c] = display_df[c].astype(int)
+                    
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
     # --- TAB 2: DISTRIBUTION (2x2 VIEW) ---
     with tab2:
         st.header("2. Distribution Analysis (A-B+ vs Others)")
