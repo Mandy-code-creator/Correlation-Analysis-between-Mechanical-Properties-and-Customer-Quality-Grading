@@ -45,12 +45,14 @@ if uploaded_file is not None:
         "3. PRODUCTION CONTROL LIMITS (EXECUTIVE VIEW)"
     ])
 
-    # --- TAB 1: SUMMARY ---
+    # --- TAB 1: SUMMARY (Khớp 100% với tính tay) ---
     with tab1:
         st.header("1. Quality Summary by Thickness")
+        # Gom nhóm và cộng tổng theo đúng các cột Mandy có
         summary_df = df.groupby('厚度歸類')[count_cols].sum().reset_index()
         summary_df['Total Coils'] = summary_df[count_cols].sum(axis=1)
         
+        # Tính tỷ lệ % cho từng loại
         for col in count_cols:
             summary_df[f"% {col}"] = (summary_df[col] / summary_df['Total Coils'] * 100).fillna(0).round(2)
             
@@ -58,7 +60,7 @@ if uploaded_file is not None:
         display_df.rename(columns={'厚度歸類': 'Thickness'}, inplace=True)
         display_df.insert(0, 'No.', range(1, len(display_df) + 1))
         
-        # Ép kiểu số nguyên cho các cột số lượng
+        # Ép kiểu số nguyên để mất cái đuôi .0
         int_cols = [c for c in (count_cols + ['Total Coils', 'No.']) if c in display_df.columns]
         for c in int_cols:
             display_df[c] = display_df[c].astype(int)
