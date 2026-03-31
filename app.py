@@ -57,7 +57,7 @@ if uploaded_file is not None:
             
         display_df = summary_df.copy()
         display_df.rename(columns={'厚度歸類': 'Thickness'}, inplace=True)
-        display_df.insert(0, 'No.', range(1, len(display_df) + 1))
+        display_df.insert(0, 'STT', range(1, len(display_df) + 1))
         
         cols_to_int = count_cols + ['Total Coils']
         for c in cols_to_int:
@@ -70,7 +70,7 @@ if uploaded_file is not None:
     with tab2:
         st.header("2. Distribution Analysis (Parallel Clear View)")
         grade_mapping = {'A+B+': 'A+B+數', 'A-B+': 'A-B+數', 'A-B': 'A-B數', 'A-B-': 'A-B-數', 'B+': 'B+數'}
-        # Đã setup màu sắc tương phản rõ ràng
+        # Cấu hình màu sắc tương phản rõ ràng
         colors = ['#2ca02c', '#1f77b4', '#ff7f0e', '#9467bd', '#d62728'] 
         thickness_list = sorted(df['厚度歸類'].dropna().unique(), key=str)
 
@@ -86,7 +86,7 @@ if uploaded_file is not None:
                 if len(temp_d) > 2:
                     vals_d, wgts_d = temp_d[feat].values, temp_d[col_n].values
                     
-                    # CẢI TIẾN MÀU SẮC BIỂU ĐỒ CỘT Ở ĐÂY (Tăng alpha lên 0.45 và thêm viền trắng)
+                    # Biểu đồ cột alpha 0.45 và viền trắng giúp màu đậm đà, dễ phân biệt
                     sns.histplot(x=vals_d, weights=wgts_d, label=label, color=color, bins=k_b, 
                                  stat='count', alpha=0.45, ax=ax, edgecolor='white', linewidth=0.5)
                     
@@ -214,31 +214,6 @@ if uploaded_file is not None:
                 else:
                     seg_dist = "N/A"
 
-                target_grade = 'A-B+數'
-                temp_opt = df_t[[feat, target_grade, 'Total_Count']].dropna()
-                success_prob = None
-                if len(temp_opt) > 0:
-                    temp_opt['bin'] = pd.qcut(temp_opt[feat], q=12, duplicates='drop')
-                    bin_res = temp_opt.groupby('bin', observed=True).agg({
-                        target_grade: 'sum',
-                        'Total_Count': 'sum'
-                    })
-                    bin_res['Success_Rate'] = (bin_res[target_grade] / bin_res['Total_Count'] * 100).fillna(0).round(0).astype(int)
-                    bin_res['Mid'] = bin_res.index.map(lambda x: x.mid).astype(float)
-                    bins_in_ctrl = bin_res[(bin_res['Mid'] >= LCL_I) & (bin_res['Mid'] <= UCL_I)]
-                    if not bins_in_ctrl.empty:
-                        success_prob = bins_in_ctrl['Success_Rate'].mean()
-
-                if success_prob is not None:
-                    if success_prob >= 70 and seg_total > 0 and (seg_A_Bplusplus+seg_A_Bplus)/seg_total >= 0.75:
-                        exp_quality = "A-B+"
-                    elif success_prob >= 40:
-                        exp_quality = "A-B"
-                    else:
-                        exp_quality = "B or lower"
-                else:
-                    exp_quality = "Unknown"
-
                 status = "✅ Safe"
                 if low is not None and safe_val < low:
                     status = "⚠ Risk (below limit)"
@@ -267,7 +242,7 @@ if uploaded_file is not None:
 
             # --- I-MR Chart ---
             for feat in mech_features:
-                st.markdown(f"### I-MR Chart: {feat}")
+                st.markdown(f"#### I-MR Chart: {feat}")
                 v = df_t[feat].dropna().values
                 if len(v) > 1:
                     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 6))
@@ -284,31 +259,7 @@ if uploaded_file is not None:
                     ax2.axhline(np.mean(MR), color='green', ls='--')
                     ax2.set_title("Moving Range Chart")
                     st.pyplot(fig)
-
-            # --- Success Probability Curves ---
-            target_grade = 'A-B+數'
-            pairs = [("YS","TS"), ("EL","YPE")]
-            for f1, f2 in pairs:
-                if f1 in df_t.columns and f2 in df_t.columns:
-                    st.markdown(f"### Success Probability Curves: {f1} & {f2}")
-                    fig, axes = plt.subplots(1, 2, figsize=(18, 5))
-                    for ax, f in zip(axes, [f1, f2]):
-                        temp = df_t[[f, target_grade, 'Total_Count']].dropna()
-                        if len(temp) > 0:
-                            temp['bin'] = pd.qcut(temp[f], q=12, duplicates='drop')
-                            bin_r = temp.groupby('bin', observed=True).agg({target_grade:'sum', 'Total_Count':'sum'})
-                            bin_r['SR'] = (bin_r[target_grade]/bin_r['Total_Count']*100).fillna(0).round(0).astype(int)
-                            bin_r['L'] = bin_r.index.map(lambda x: f"{x.left:.0f}-{x.right:.0f}")
-                            x_pos = np.arange(len(bin_r))
-                            ax.bar(x_pos, bin_r['Total_Count'], color='lightgray', alpha=0.5)
-                            ax2 = ax.twinx()
-                            ax2.plot(x_pos, bin_r['SR'], marker='o', color='green', lw=2)
-                            ax.set_xticks(x_pos)
-                            ax.set_xticklabels(bin_r['L'], rotation=45, ha='right')
-                            ax.set_xlabel(f)
-                            ax2.set_ylim(0, 105)
-                    st.pyplot(fig)
-                    st.markdown("---")
+            st.markdown("---")
 
         # --- EXPORT FINAL ---
         if all_export_data:
