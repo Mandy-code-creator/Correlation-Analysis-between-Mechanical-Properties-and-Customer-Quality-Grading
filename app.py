@@ -64,21 +64,21 @@ if uploaded_file is not None:
                 
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-    # --- TAB 2: DISTRIBUTION (CẬP NHẬT: SO SÁNH TỔNG HỢP + CHI TIẾT) ---
+   # --- TAB 2: DISTRIBUTION (SO SÁNH TỔNG HỢP + CHI TIẾT) ---
     with tab2:
         st.header("2. Mechanical Properties Distribution Analysis")
         
-        # Lấy danh sách độ dày và sắp xếp theo số để vẽ biểu đồ so sánh
+        # Đảm bảo sắp xếp độ dày theo số để vẽ biểu đồ so sánh cho đúng thứ tự
         thickness_list = sorted(df['厚度歸類'].dropna().unique(), key=lambda x: float(x))
         
         # ---------------------------------------------------------
         # PHẦN 1: BIỂU ĐỒ SO SÁNH TỔNG HỢP (0.5 ~ 0.8 TRÊN CÙNG 1 HÌNH)
         # ---------------------------------------------------------
         st.subheader("📌 Cross-Thickness Comparison (Combined View)")
-        st.info("Biểu đồ dưới đây giúp so sánh xu hướng cơ lý giữa các độ dày khác nhau.")
+        st.info("Biểu đồ đường cong mật độ (KDE) giúp so sánh xu hướng cơ lý giữa các độ dày khác nhau.")
         
         comp_cols = st.columns(2)
-        # Vẽ 4 đặc tính quan trọng nhất
+        # Vẽ 4 đặc tính quan trọng nhất (YS, TS, EL, YPE)
         for idx, feat in enumerate(['YS', 'TS', 'EL', 'YPE']):
             if feat in mech_features:
                 with comp_cols[idx % 2]:
@@ -86,10 +86,11 @@ if uploaded_file is not None:
                     
                     # Vẽ đường cong phân phối (KDE) cho từng độ dày
                     for thick in thickness_list:
-                        df_thick = df[df['厚 độ 歸類'] == thick].dropna(subset=[feat])
+                        # Đã sửa lỗi KeyError tại đây: dùng '厚度歸類' chính xác
+                        df_thick = df[df['厚度歸類'] == thick].dropna(subset=[feat])
                         if not df_thick.empty:
                             vals = df_thick[feat].values
-                            # Trọng số là tổng tất cả các cuộn (A-B+, A-B, A-B-, B+, B)
+                            # Trọng số tính dựa trên tổng tất cả các cột số lượng
                             weights = df_thick[count_cols].sum(axis=1).values
                             
                             if weights.sum() > 0:
@@ -103,19 +104,19 @@ if uploaded_file is not None:
                     ax_comp.grid(axis='y', linestyle='--', alpha=0.3)
                     
                     st.pyplot(fig_comp)
-                    # Lưu ảnh để xuất PDF (Trang so sánh tổng hợp)
+                    # Lưu ảnh so sánh để có thể dùng xuất PDF sau này
                     fig_comp.savefig(f"compare_{feat}.png", bbox_inches='tight')
 
         st.markdown("---")
 
         # ---------------------------------------------------------
-        # PHẦN 2: CHI TIẾT TỪNG ĐỘ DÀY (GIỮ NGUYÊN LOGIC CŨ CỦA MANDY)
+        # PHẦN 2: CHI TIẾT TỪNG ĐỘ DÀY (DÙNG EXPANDER CHO GỌN)
         # ---------------------------------------------------------
         st.subheader("🔍 Detailed Distribution per Thickness Category")
         color_map = {'A-B+數': '#2ca02c', 'A-B-數': '#ff7f0e', 'B+數': '#d62728', 'B數': '#9467bd', 'A-B數': '#1f77b4'}
 
         def plot_feature_dist(ax, data, feat, thick, is_right_col=False):
-            # Tính toán số bin dựa trên tổng số lượng cuộn thực tế
+            # Tính toán số bin (k) theo công thức Sturges dựa trên Total_Count
             N_t = data['Total_Count'].sum()
             k_b = max(int(1 + 3.322 * math.log10(N_t)) if N_t > 0 else 10, 5)
             
@@ -135,11 +136,12 @@ if uploaded_file is not None:
                         if s_d > 0:
                             x_range = np.linspace(m_d - 4*s_d, m_d + 4*s_d, 100)
                             bin_w = (vals_d.max() - vals_d.min()) / k_b if vals_d.max() != vals_d.min() else 1
-                            ax.plot(x_range, stats.norm.pdf(x_range, m_d, s_d) * wgts_d.sum() * bin_w, color=color, lw=2)
+                            ax.plot(x_range, stats.norm.pdf(x_range, m_d, s_val=s_d) * wgts_d.sum() * bin_w, color=color, lw=2)
 
             ax.set_title(f"{feat} - Thick: {thick}")
             if is_right_col: ax.legend(title="Grade", bbox_to_anchor=(1.05, 1), loc='upper left')
 
+        # Duyệt qua từng độ dày để tạo Expander chi tiết
         for thickness in thickness_list:
             df_thickness = df[df['厚度歸類'] == thickness]
             with st.expander(f"📏 Click to expand Analysis for Thickness: {thickness}"):
