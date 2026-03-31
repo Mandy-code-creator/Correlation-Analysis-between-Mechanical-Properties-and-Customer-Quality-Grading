@@ -261,8 +261,8 @@ if uploaded_file is not None:
                     v = plot_data_dict[thick][feat] 
                     if len(v) > 1:
                         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 7))
-                        m_v = np.mean(v)
-                        s_v = np.std(v, ddof=1)
+                        m_v = mean_val   # lấy weighted mean đã tính ở trên
+                        s_v = std_val    # lấy std_val đã tính ở trên
                         U, L = m_v + sigma_choice*s_v, m_v - sigma_choice*s_v
                         
                         ax1.plot(v, marker='o', color='blue', markersize=4)
