@@ -8,6 +8,7 @@ import math
 import io
 from fpdf import FPDF
 import os
+from matplotlib.patches import Patch
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="QC Mechanical Properties Optimizer", layout="wide")
@@ -22,7 +23,6 @@ if uploaded_file is not None:
     df = pd.read_excel(uploaded_file)
     df.columns = df.columns.str.strip() 
 
-    # --- KHỞI TẠO BIẾN GLOBAL ĐỂ TRÁNH NAMEERROR ---
     all_export_data = []
     
     # --- 2. DATA PREPROCESSING ---
@@ -40,6 +40,23 @@ if uploaded_file is not None:
         df[feat] = pd.to_numeric(df[feat], errors='coerce')
 
     thickness_list = sorted(df['厚度歸類'].dropna().unique(), key=lambda x: float(x))
+
+    # Hàm tính Y chung cho biểu đồ cân xứng
+    def get_shared_y(data, features):
+        max_y = 0
+        for feat in features:
+            if feat in data.columns:
+                vd = data.dropna(subset=[feat])
+                if not vd.empty:
+                    f_min, f_max = vd[feat].min(), vd[feat].max()
+                    if f_min < f_max:
+                        bins = np.linspace(f_min, f_max, 16) 
+                        for c in count_cols:
+                            wd = vd[vd[c] > 0]
+                            if not wd.empty:
+                                cnts, _ = np.histogram(wd[feat], bins=bins, weights=wd[c])
+                                max_y = max(max_y, cnts.max())
+        return max_y * 1.35 if max_y > 0 else 100
 
     # --- 3. CREATE TABS ---
     tab1, tab2, tab3 = st.tabs([
@@ -67,31 +84,25 @@ if uploaded_file is not None:
                 display_df[c] = display_df[c].astype(int)
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-    # --- TAB 2: DISTRIBUTION (AUTO SMART SCALING FIX) ---
+    # --- TAB 2: DISTRIBUTION ---
     with tab2:
         st.header("2. Mechanical Properties Distribution Analysis")
 
-        def plot_qc_dist(ax, data, feat, title, is_right=False):
+        def plot_qc_dist(ax, data, feat, title, custom_y_limit, is_right=False):
             k_b = 15 
             color_map = {'A-B+數': '#1f77b4', 'A-B數': '#ff7f0e', 'A-B-數': '#9467bd', 'B+數': '#d62728', 'B數': '#7f7f7f'}
             mean_inf = []
-            
             ax.grid(axis='y', linestyle=':', alpha=0.6, zorder=0)
             
-            # Draw Data
             for col_n in count_cols:
                 temp_d = data[[feat, col_n]].dropna()
                 temp_d = temp_d[temp_d[col_n] > 0]
                 if not temp_d.empty:
                     vals, wgts = temp_d[feat].values, temp_d[col_n].values
                     color = color_map.get(col_n, '#7f7f7f')
-                    
-                    sns.histplot(x=vals, weights=wgts, label=col_n.replace('數',''), 
-                                 color=color, bins=k_b, stat='count', alpha=0.4, ax=ax, zorder=2)
-                    
+                    sns.histplot(x=vals, weights=wgts, color=color, bins=k_b, stat='count', alpha=0.4, ax=ax, zorder=2)
                     m = np.average(vals, weights=wgts)
                     s = np.sqrt(np.average((vals - m)**2, weights=wgts))
-                    
                     ax.axvline(m, color=color, ls='--', lw=1.5, zorder=3)
                     mean_inf.append({'val': m, 'color': color})
 
@@ -100,22 +111,15 @@ if uploaded_file is not None:
                         bin_w = (vals.max() - vals.min()) / k_b if vals.max() != vals.min() else 1
                         ax.plot(x_r, stats.norm.pdf(x_r, m, s) * wgts.sum() * bin_w, color=color, lw=2, zorder=4)
 
-            # --- AUTO SMART SCALING: Fix "kỳ quá" error ---
-            # Lấy chiều cao tự động của Matplotlib, sau đó cộng thêm 35% không gian trống
-            current_top = ax.get_ylim()[1]
-            ax.set_ylim(0, current_top * 1.35)
+            ax.set_ylim(0, custom_y_limit)
 
-            # Precise Staggered Labels (4 Levels)
             if mean_inf:
                 mean_inf.sort(key=lambda x: x['val'])
-                y_max = ax.get_ylim()[1]
                 levels = [0.90, 0.82, 0.74, 0.66]
-                
                 for i, info in enumerate(mean_inf):
-                    y_pos = y_max * levels[i % len(levels)]
+                    y_pos = custom_y_limit * levels[i % len(levels)]
                     ax.text(info['val'], y_pos, f"{int(round(info['val']))}", 
-                            color=info['color'], fontsize=9, fontweight='bold',
-                            ha='center', va='center', zorder=5,
+                            color=info['color'], fontsize=9, fontweight='bold', ha='center', va='center', zorder=5,
                             bbox=dict(facecolor='white', alpha=0.9, edgecolor=info['color'], boxstyle='round,pad=0.3'))
 
             ax.set_title(f"{feat} (Thickness: {title})", fontsize=12, fontweight='bold', pad=10)
@@ -123,33 +127,37 @@ if uploaded_file is not None:
             ax.set_xlabel("")
             
             if is_right:
-                ax.legend(title="Grade", title_fontsize='10', fontsize='9', 
-                          bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0.)
+                legend_elements = [Patch(facecolor=color_map[k], edgecolor='white', label=k.replace('數',''), alpha=0.5) for k in color_map]
+                ax.legend(handles=legend_elements, title="Grade", title_fontsize='10', fontsize='9', bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0.)
 
         st.subheader("🌐 Factory Overall Distribution")
+        overall_y = get_shared_y(df, ['YS', 'TS', 'EL', 'YPE'])
         ov_cols = st.columns(2)
         for idx, feat in enumerate(['YS', 'TS', 'EL', 'YPE']):
             if feat in mech_features:
                 with ov_cols[idx % 2]:
                     fig_ov, ax_ov = plt.subplots(figsize=(10, 5))
-                    plot_qc_dist(ax_ov, df, feat, "Overall", is_right=(idx % 2 != 0))
+                    plot_qc_dist(ax_ov, df, feat, "Overall", custom_y_limit=overall_y, is_right=(idx % 2 != 0))
                     st.pyplot(fig_ov)
+                    fig_ov.savefig(f"overall_{feat}.png", bbox_inches='tight') # LƯU ẢNH OVERALL
 
         st.markdown("---")
         st.subheader("🔍 Thickness Detailed Analysis")
         for thick in thickness_list:
             df_thick = df[df['厚度歸類'] == thick]
             st.markdown(f"### 📏 Category: **{thick}**")
+            local_y = get_shared_y(df_thick, ['YS', 'TS', 'EL', 'YPE']) 
             cols_dist = st.columns(2)
             for idx, feat in enumerate(['YS', 'TS', 'EL', 'YPE']):
                 if feat in mech_features:
                     with cols_dist[idx % 2]:
                         fig, ax = plt.subplots(figsize=(10, 5))
-                        plot_qc_dist(ax, df_thick, feat, thick, is_right=(idx % 2 != 0))
+                        plot_qc_dist(ax, df_thick, feat, thick, custom_y_limit=local_y, is_right=(idx % 2 != 0))
                         st.pyplot(fig)
+                        fig.savefig(f"dist_{feat}_{thick}.png", bbox_inches='tight') # LƯU ẢNH DETAIL
             st.markdown("---")
 
-    # --- TAB 3: OPTIMIZATION & I-MR CHARTS (FIXED EXPORT DICTIONARY) ---
+    # --- TAB 3: OPTIMIZATION & I-MR CHARTS ---
     with tab3:
         st.header("3. Production Control Limits & Goals (A-B & Above Focused)")
         
@@ -157,24 +165,42 @@ if uploaded_file is not None:
         spec_limits = {"YS": (405, 500), "TS": (415, 550), "EL": (25, None), "YPE": (4, None)}
         good_cols = [c for c in ['A-B+數', 'A-B數'] if c in df.columns]
 
+        # 1. OVERALL FACTORY (CẬP NHẬT ĐẦY ĐỦ THÔNG TIN)
         st.subheader("🌐 Overall Factory Performance Goals")
         overall_status = []
+        
+        # Tính tỷ lệ phần trăm phân bổ tổng thể (Segment Distribution)
+        total_n_overall = df[count_cols].sum().sum()
+        seg_dist_overall = "N/A" if total_n_overall == 0 else ", ".join([f"{k.replace('數','')}:{int(round(df[k].sum()/total_n_overall*100))}%" for k in count_cols])
+
         for feat in mech_features:
             if good_cols:
                 df_ov = df[[feat] + good_cols].dropna(subset=[feat])
                 df_ov['Good_Qty'] = df_ov[good_cols].sum(axis=1)
                 df_ov = df_ov[df_ov['Good_Qty'] > 0]
+                
+                low, high = spec_limits.get(feat, (None, None))
+                spec_str_ov = f"{int(low)}-{int(high)}" if low and high else (f">={int(low)}" if low else "N/A")
+
                 if not df_ov.empty:
                     v, w = df_ov[feat].values, df_ov['Good_Qty'].values
                     m_ov = np.average(v, weights=w)
                     s_ov = np.sqrt(np.average((v - m_ov)**2, weights=w))
+                    
                     overall_status.append({
-                        "Feature": feat, "Global Target Goal": int(round(m_ov)),
-                        "Factory Mill Range": f"{int(round(m_ov - sigma_choice*s_ov))}-{int(round(m_ov + sigma_choice*s_ov))}"
+                        "Feature": feat, 
+                        "Current Control Limit": spec_str_ov,
+                        "Segment Distribution": seg_dist_overall,
+                        "Data-Driven Release Range": f"{int(round(m_ov - 3*s_ov))}-{int(round(m_ov + 3*s_ov))}",
+                        "Target Goal": int(round(m_ov)),
+                        f"Tolerance (±{sigma_choice}σ)": int(round(sigma_choice*s_ov)),
+                        "Mill Range (Proposed)": f"{int(round(m_ov - sigma_choice*s_ov))}-{int(round(m_ov + sigma_choice*s_ov))}"
                     })
         st.dataframe(pd.DataFrame(overall_status), use_container_width=True, hide_index=True)
 
         st.markdown("---")
+        
+        # 2. LOCAL THICKNESS
         st.subheader("🔍 Local Control Limits & I-MR Trending")
         plot_data_dict = {}
 
@@ -199,7 +225,6 @@ if uploaded_file is not None:
                     sv = np.sqrt(np.average((v - mv)**2, weights=w))
                     plot_data_dict[thick][feat] = {'values': v, 'mean': mv, 'std': sv}
                     
-                    # CẤU TRÚC DICT ĐẦY ĐỦ ĐỂ KHÔNG LỖI KHI XUẤT PDF
                     total_n = df_t[count_cols].sum().sum()
                     seg_dist = "N/A" if total_n == 0 else ", ".join([f"{k.replace('數','')}:{int(round(df_t[k].sum()/total_n*100))}%" for k in count_cols])
                     
@@ -216,11 +241,10 @@ if uploaded_file is not None:
                     
                     exp_row = row.copy()
                     exp_row['Thickness'] = thick
-                    all_export_data.append(exp_row) # Lưu biến xuất mượt mà
+                    all_export_data.append(exp_row)
 
             st.dataframe(pd.DataFrame(thick_status), use_container_width=True, hide_index=True)
             
-            # Draw I-MR Charts
             cols_imr = st.columns(2)
             top4 = [f for f in ['YS', 'TS', 'EL', 'YPE'] if f in plot_data_dict[thick]]
             for idx, f in enumerate(top4):
@@ -245,6 +269,7 @@ if uploaded_file is not None:
                         ax2.set_title("Moving Range", fontsize=10)
                         ax2.set_ylabel("Range")
                         fig.tight_layout(); st.pyplot(fig)
+                        fig.savefig(f"imr_{f}_{thick}.png", bbox_inches='tight') # LƯU ẢNH I-MR
             st.markdown("---")
 
     # --- EXPORT SECTION ---
@@ -255,12 +280,14 @@ if uploaded_file is not None:
         towrite.seek(0)
         st.sidebar.download_button(label="Click to Download Excel", data=towrite, file_name="QC_Optimization_Report.xlsx")
 
-    # --- PDF EXPORT ---
+    # --- PDF EXPORT (PHỤC HỒI CODE IN BIỂU ĐỒ) ---
     st.markdown("### 🖨️ Export PDF Executive Report")
     def clean(t): return str(t).replace('±', '+/-').replace('–', '-').encode('latin-1', 'ignore').decode('latin-1')
 
     if st.button("Generate & Download PDF"):
         pdf = FPDF(orientation='L')
+        
+        # Trang 1: Summary Data
         pdf.add_page()
         pdf.set_font('Arial', 'B', 16); pdf.cell(0, 10, "QC MECHANICAL PROPERTIES REPORT", ln=True, align="C"); pdf.ln(5)
         pdf.set_font('Arial', 'B', 12); pdf.cell(0, 10, "1. Quality Summary", ln=True)
@@ -271,8 +298,22 @@ if uploaded_file is not None:
             for i, v in enumerate(r): pdf.cell(cw[i] if i < len(cw) else 20, 8, clean(v), border=1, align='C')
             pdf.ln()
 
+        # Trang 2: Overall Distribution Charts
+        pdf.add_page(); pdf.set_font('Arial', 'B', 12); pdf.cell(0, 10, "2. Factory Overall Distribution", ln=True); ys = pdf.get_y()
+        for idx, f in enumerate(['YS', 'TS', 'EL', 'YPE']):
+            path = f"overall_{f}.png"
+            if os.path.exists(path): pdf.image(path, x=(10 if idx%2==0 else 150), y=(ys if idx<2 else ys+75), w=135)
+
+        # Các trang chi tiết: Distribution và I-MR cho từng loại độ dày
         for thick in thickness_list:
-            pdf.add_page(); pdf.set_font('Arial', 'B', 12); pdf.cell(0, 10, f"2. Control Limits & Trending - Thickness: {thick}", ln=True)
+            # Distribution PDF
+            pdf.add_page(); pdf.set_font('Arial', 'B', 12); pdf.cell(0, 10, f"3. Distribution Analysis - Thickness: {thick}", ln=True); ys = pdf.get_y()
+            for idx, f in enumerate(['YS', 'TS', 'EL', 'YPE']):
+                path = f"dist_{f}_{thick}.png"
+                if os.path.exists(path): pdf.image(path, x=(10 if idx%2==0 else 150), y=(ys if idx<2 else ys+75), w=135)
+            
+            # Control Limits & I-MR PDF
+            pdf.add_page(); pdf.set_font('Arial', 'B', 12); pdf.cell(0, 10, f"4. Control Limits & Trending - Thickness: {thick}", ln=True)
             heads = ["Feature", "Current Limit", "Segment Dist", "Release Range", "Target", "Tol", "Mill Range"]; c_w3 = [25, 25, 80, 35, 15, 20, 40]
             pdf.set_font('Arial', 'B', 8)
             for i, h in enumerate(heads): pdf.cell(c_w3[i], 7, clean(h), border=1, align='C')
@@ -283,8 +324,10 @@ if uploaded_file is not None:
                     for i, v in enumerate(v_list): pdf.cell(c_w3[i], 7, clean(v), border=1, align='C')
                     pdf.ln()
             yt = pdf.get_y() + 5
-            # In PDF chỉ giữ lại trang Control Limit và I-MR để tránh PDF quá nặng
-            # ...
+            for idx, f in enumerate(['YS', 'TS', 'EL', 'YPE']):
+                path = f"imr_{f}_{thick}.png"
+                if os.path.exists(path): pdf.image(path, x=(10 if idx%2==0 else 150), y=(yt if idx<2 else yt+75), w=135)
+
         pdf.output("QC_Report.pdf")
         with open("QC_Report.pdf", "rb") as f:
             st.download_button("📥 Download Final PDF", f.read(), "QC_Report.pdf", "application/pdf")
