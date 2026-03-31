@@ -382,18 +382,29 @@ if uploaded_file is not None:
                     pdf.cell(col_widths_3[i], 8, head, border=1, align='C')
                 pdf.ln()
                 
+                pdf.set_font('Arial', 'B', 8)
+                # Đã xóa "Status" khỏi danh sách Header
+                headers = ["Feature", "Current Limit", "Segment Distribution", "Release Range", "Target", f"Tol(+/-{sigma_choice})", "Mill Range"]
+                # Chia lại độ rộng cho 7 cột (Tổng = 240)
+                col_widths_3 = [25, 25, 80, 35, 15, 20, 40] 
+                
+                for i, head in enumerate(headers):
+                    pdf.cell(col_widths_3[i], 8, head, border=1, align='C')
+                pdf.ln()
+                
                 pdf.set_font('Arial', '', 8)
                 for row in all_export_data:
                     if row['Thickness'] == thick:
                         pdf.cell(col_widths_3[0], 8, clean_text(row.get("Feature", "")), border=1, align='C')
-                        pdf.cell(col_widths_3[1], 8, clean_text(row.get("Current Limit", "")), border=1, align='C')
+                        # Đã sửa thành tên chuẩn "Current Control Limit" để gọi đúng dữ liệu
+                        pdf.cell(col_widths_3[1], 8, clean_text(row.get("Current Control Limit", "")), border=1, align='C')
                         pdf.cell(col_widths_3[2], 8, clean_text(row.get("Segment Distribution", "")), border=1, align='C')
                         pdf.cell(col_widths_3[3], 8, clean_text(row.get("Data-Driven Release Range", "")), border=1, align='C')
                         pdf.cell(col_widths_3[4], 8, clean_text(row.get("Target Goal", "")), border=1, align='C')
                         tol_key = f"Tolerance (±{sigma_choice}σ)"
                         pdf.cell(col_widths_3[5], 8, clean_text(row.get(tol_key, "")), border=1, align='C')
                         pdf.cell(col_widths_3[6], 8, clean_text(row.get("Mill Range (Proposed)", "")), border=1, align='C')
-                        
+                        # Dòng in Status ở cuối cùng đã bị xóa hoàn toàn
                         pdf.ln()
                 
                 pdf.ln(5)
