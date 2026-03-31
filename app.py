@@ -237,6 +237,7 @@ if uploaded_file is not None:
             if status_list:
                 st.dataframe(pd.DataFrame(status_list), use_container_width=True, hide_index=True)
 
+            
             # --- I-MR Charts ---
             for feat in mech_features:
                 if feat in plot_data_dict[thick]:
