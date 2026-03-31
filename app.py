@@ -130,137 +130,140 @@ if uploaded_file is not None:
             st.markdown("---")
 
     # --- TAB 3: OPTIMIZATION (Data-Driven Executive View) ---
-    with tab3:
-        st.header("3. Production Control Limits & Goals (A-B & Above Focused)")
-        sigma_factor = st.radio("Select Sigma Factor for Mill Safety Zone", [2.0, 2.5, 3.0], index=0)
+with tab3:
+    st.header("3. Production Control Limits & Goals (A-B & Above Focused)")
+    # Đã sửa tên biến thành sigma_choice để đồng bộ
+    sigma_choice = st.radio("Select Sigma Factor for Mill Safety Zone", [2.0, 2.5, 3.0], index=0)
 
-        spec_limits = {
-            "YS": (405, 500), "TS": (415, 550), "EL": (25, None), "YPE": (4, None)
-        }
+    spec_limits = {
+        "YS": (405, 500), "TS": (415, 550), "EL": (25, None), "YPE": (4, None)
+    }
 
-        thickness_list = sorted(df['厚度歸類'].dropna().unique(), key=str)
-        all_export_data = []
-        plot_data_dict = {}
+    thickness_list = sorted(df['厚度歸類'].dropna().unique(), key=str)
+    all_export_data = []
+    plot_data_dict = {}
 
-        for thick in thickness_list:
-            st.subheader(f"Thickness Category: {thick}")
-            df_t = df[df['厚度歸類'] == thick]
-            plot_data_dict[thick] = {}
-            status_list = []
-            
-            good_grades = [c for c in ['A+B+數', 'A-B+數', 'A-B數'] if c in df_t.columns]
+    for thick in thickness_list:
+        st.subheader(f"Thickness Category: {thick}")
+        df_t = df[df['厚度歸類'] == thick]
+        plot_data_dict[thick] = {}
+        status_list = []
+        
+        good_grades = [c for c in ['A+B+數', 'A-B+數', 'A-B數'] if c in df_t.columns]
 
-            for feat in mech_features:
-                temp_calc = df_t[[feat] + good_grades].dropna(subset=[feat])
-                if len(temp_calc) == 0: continue
+        for feat in mech_features:
+            temp_calc = df_t[[feat] + good_grades].dropna(subset=[feat])
+            if len(temp_calc) == 0: continue
 
-                temp_calc['Good_Count'] = temp_calc[good_grades].sum(axis=1)
-                temp_calc_good = temp_calc[temp_calc['Good_Count'] > 0]
+            temp_calc['Good_Count'] = temp_calc[good_grades].sum(axis=1)
+            temp_calc_good = temp_calc[temp_calc['Good_Count'] > 0]
 
-                low, high = spec_limits.get(feat, (None, None))
-                spec_str = f"{int(low)}–{int(high)}" if low and high else (f">={int(low)}" if low else "N/A")
+            low, high = spec_limits.get(feat, (None, None))
+            spec_str = f"{int(low)}–{int(high)}" if low and high else (f">={int(low)}" if low else "N/A")
 
-# --- CALCULATE DATA-DRIVEN LIMITS ---
-                if not temp_calc_good.empty:
-                    vals_good = temp_calc_good[feat].values
-                    wgts_good = temp_calc_good['Good_Count'].values
-                    
-                    # 1. Target Goal (Mean)
+            # --- CALCULATE DATA-DRIVEN LIMITS ---
+            if not temp_calc_good.empty:
+                vals_good = temp_calc_good[feat].values
+                wgts_good = temp_calc_good['Good_Count'].values
+                
+                # 1. Target Goal (Mean)
+                mean_val = np.average(vals_good, weights=wgts_good)
+                std_val = np.sqrt(np.average((vals_good - mean_val)**2, weights=wgts_good))
+                
+                # Lọc nhiễu Outliers
+                mask = (vals_good >= mean_val - 3*std_val) & (vals_good <= mean_val + 3*std_val)
+                if mask.sum() > 0:
+                    vals_good = vals_good[mask]
+                    wgts_good = wgts_good[mask]
                     mean_val = np.average(vals_good, weights=wgts_good)
                     std_val = np.sqrt(np.average((vals_good - mean_val)**2, weights=wgts_good))
-                    
-                    # Lọc nhiễu Outliers (Giữ lại phổ dữ liệu thuần khiết)
-                    mask = (vals_good >= mean_val - 3*std_val) & (vals_good <= mean_val + 3*std_val)
-                    if mask.sum() > 0:
-                        vals_good = vals_good[mask]
-                        wgts_good = wgts_good[mask]
-                        mean_val = np.average(vals_good, weights=wgts_good)
-                        std_val = np.sqrt(np.average((vals_good - mean_val)**2, weights=wgts_good))
-                    
-                    plot_data_dict[thick][feat] = vals_good
-                    target_goal = int(round(mean_val))
-                    
-                    # 2. Data-Driven Release Range (3 Sigma)
-                    rel_low_raw = mean_val - 3 * std_val
-                    rel_high_raw = mean_val + 3 * std_val
-                    rel_low = max(rel_low_raw, low) if low is not None else rel_low_raw
-                    rel_high = min(rel_high_raw, high) if high is not None else rel_high_raw
-                    release_range = f"{int(round(rel_low))}–{int(round(rel_high))}" if high is not None else f">={int(round(rel_low))}"
-                    
-                    # 3. Mill Range (Dùng sigma_choice đã khai báo ở st.radio)
-                    mill_low_raw = mean_val - sigma_choice * std_val
-                    mill_high_raw = mean_val + sigma_choice * std_val
-                    mill_low = max(mill_low_raw, rel_low)
-                    mill_high = min(mill_high_raw, rel_high)
-                    mill_range = f"{int(round(mill_low))}–{int(round(mill_high))}" if high is not None else f">={int(round(mill_low))}"
-
-                    # 4. Tính toán giá trị Tolerance thực tế
-                    tolerance_val = int(round(sigma_choice * std_val))
-
-                else:
-                    target_goal = "N/A"
-                    release_range = "N/A"
-                    mill_range = "N/A"
-                    tolerance_val = "N/A"
-                    mean_val = 0
-                    std_val = 0
-
-                # --- SEGMENT DISTRIBUTION (Giữ nguyên 5 cấp độ) ---
-                seg_total = df_t[count_cols].sum().sum()
-                if seg_total > 0:
-                    seg_dist = ", ".join([f"{k.replace('數','')}: {int(round(df_t[k].sum()/seg_total*100))}%" for k in count_cols])
-                else:
-                    seg_dist = "N/A"
-
-                # --- ROW DATA (Đảm bảo sigma_choice đã tồn tại) ---
-                row_data = {
-                    "Feature": feat,
-                    "Customer Spec Limit": spec_str,
-                    "Segment Distribution": seg_dist,
-                    "Data-Driven Release Range": release_range,
-                    "Target Goal": target_goal,
-                    f"Tolerance (±{sigma_choice}σ)": tolerance_val, # Dòng gây lỗi đã được sửa tên biến
-                    "Mill Range (Proposed)": mill_range,
-                    "Status": "✅ Safe" if (low is None or (mean_val - sigma_choice*std_val) >= low) else "⚠ Risk"
-                }
                 
-                status_list.append(row_data)
-                all_export_data.append(row_data)
-            # --- I-MR Charts ---
-            for feat in mech_features:
-                if feat in plot_data_dict[thick]:
-                    v = plot_data_dict[thick][feat] 
-                    if len(v) > 1:
-                        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 7))
-                        
-                        m_v = np.mean(v)
-                        s_v = np.std(v, ddof=1)
-                        U, L = m_v + sigma_factor*s_v, m_v - sigma_factor*s_v
-                        
-                        ax1.plot(v, marker='o', color='blue', markersize=4)
-                        ax1.axhline(m_v, color='green', ls='--', label=f'Mean: {int(round(m_v))}')
-                        ax1.axhline(U, color='red', ls='--', label=f'UCL: {int(round(U))}')
-                        ax1.axhline(L, color='red', ls='--', label=f'LCL: {int(round(L))}')
-                        ax1.set_title(f"Individuals Chart (A-B & Above Only): {feat}")
-                        ax1.legend(loc='upper right', fontsize=8)
-                        
-                        MR = np.abs(np.diff(v))
-                        ax2.plot(MR, marker='o', color='orange', markersize=4)
-                        ax2.axhline(np.mean(MR), color='green', ls='--', label=f'MR Mean: {int(round(np.mean(MR)))}')
-                        ax2.set_title("Moving Range Chart")
-                        ax2.legend(loc='upper right', fontsize=8)
-                        
-                        fig.tight_layout(pad=3.0)
-                        st.pyplot(fig)
-            st.markdown("---")
+                plot_data_dict[thick][feat] = vals_good
+                target_goal = int(round(mean_val))
+                
+                # 2. Data-Driven Release Range (3 Sigma)
+                rel_low_raw = mean_val - 3 * std_val
+                rel_high_raw = mean_val + 3 * std_val
+                rel_low = max(rel_low_raw, low) if low is not None else rel_low_raw
+                rel_high = min(rel_high_raw, high) if high is not None else rel_high_raw
+                release_range = f"{int(round(rel_low))}–{int(round(rel_high))}" if high is not None else f">={int(round(rel_low))}"
+                
+                # 3. Mill Range (Sử dụng sigma_choice)
+                mill_low_raw = mean_val - sigma_choice * std_val
+                mill_high_raw = mean_val + sigma_choice * std_val
+                mill_low = max(mill_low_raw, rel_low)
+                mill_high = min(mill_high_raw, rel_high)
+                mill_range = f"{int(round(mill_low))}–{int(round(mill_high))}" if high is not None else f">={int(round(mill_low))}"
 
-        # --- EXPORT FINAL ---
-        if all_export_data:
-            st.markdown("### 📥 Download Final QC Report")
-            towrite = io.BytesIO()
-            pd.DataFrame(all_export_data).to_excel(towrite, index=False, engine='openpyxl')
-            towrite.seek(0)
-            st.download_button(label="📥 Download Executive Report (Excel)", data=towrite, 
-                               file_name="QC_Mill_Range_Report.xlsx")
-else:
-    st.info("Please upload an Excel file.")
+                # 4. Tính toán giá trị Tolerance thực tế
+                tolerance_val = int(round(sigma_choice * std_val))
+
+            else:
+                target_goal = "N/A"
+                release_range = "N/A"
+                mill_range = "N/A"
+                tolerance_val = "N/A"
+                mean_val = 0
+                std_val = 0
+
+            # --- SEGMENT DISTRIBUTION ---
+            seg_total = df_t[count_cols].sum().sum()
+            if seg_total > 0:
+                seg_dist = ", ".join([f"{k.replace('數','')}: {int(round(df_t[k].sum()/seg_total*100))}%" for k in count_cols])
+            else:
+                seg_dist = "N/A"
+
+            # --- ROW DATA ---
+            row_data = {
+                "Feature": feat,
+                "Customer Spec Limit": spec_str,
+                "Segment Distribution": seg_dist,
+                "Data-Driven Release Range": release_range,
+                "Target Goal": target_goal,
+                f"Tolerance (±{sigma_choice}σ)": tolerance_val, 
+                "Mill Range (Proposed)": mill_range,
+                "Status": "✅ Safe" if (low is None or (mean_val - sigma_choice*std_val) >= low) else "⚠ Risk"
+            }
+            
+            status_list.append(row_data)
+            all_export_data.append(row_data)
+
+        # Hiển thị DataFrame cho độ dày này
+        st.dataframe(pd.DataFrame(status_list), use_container_width=True, hide_index=True)
+
+        # --- I-MR Charts (Sử dụng sigma_choice đồng bộ) ---
+        for feat in mech_features:
+            if feat in plot_data_dict[thick]:
+                v = plot_data_dict[thick][feat] 
+                if len(v) > 1:
+                    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 7))
+                    
+                    m_v = np.mean(v)
+                    s_v = np.std(v, ddof=1)
+                    U, L = m_v + sigma_choice*s_v, m_v - sigma_choice*s_v
+                    
+                    ax1.plot(v, marker='o', color='blue', markersize=4)
+                    ax1.axhline(m_v, color='green', ls='--', label=f'Mean: {int(round(m_v))}')
+                    ax1.axhline(U, color='red', ls='--', label=f'UCL: {int(round(U))}')
+                    ax1.axhline(L, color='red', ls='--', label=f'LCL: {int(round(L))}')
+                    ax1.set_title(f"Individuals Chart (A-B & Above Only): {feat}")
+                    ax1.legend(loc='upper right', fontsize=8)
+                    
+                    MR = np.abs(np.diff(v))
+                    ax2.plot(MR, marker='o', color='orange', markersize=4)
+                    ax2.axhline(np.mean(MR), color='green', ls='--', label=f'MR Mean: {int(round(np.mean(MR)))}')
+                    ax2.set_title("Moving Range Chart")
+                    ax2.legend(loc='upper right', fontsize=8)
+                    
+                    fig.tight_layout(pad=3.0)
+                    st.pyplot(fig)
+        st.markdown("---")
+
+    # --- EXPORT FINAL ---
+    if all_export_data:
+        st.markdown("### 📥 Download Final QC Report")
+        towrite = io.BytesIO()
+        pd.DataFrame(all_export_data).to_excel(towrite, index=False, engine='openpyxl')
+        towrite.seek(0)
+        st.download_button(label="📥 Download Executive Report (Excel)", data=towrite, 
+                           file_name="QC_Mill_Range_Report.xlsx")
