@@ -6,6 +6,8 @@ import numpy as np
 import scipy.stats as stats
 import math
 import io
+from fpdf import FPDF
+import os
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="QC Mechanical Properties Optimizer", layout="wide")
@@ -304,3 +306,135 @@ if uploaded_file is not None:
             towrite.seek(0)
             st.download_button(label="📥 Download Executive Report (Excel)", data=towrite, 
                                file_name="QC_Mill_Range_Report.xlsx")
+# =========================================================================
+    # --- XUẤT BÁO CÁO PDF (EXECUTIVE PDF REPORT) ---
+    # =========================================================================
+    st.markdown("---")
+    st.header("🖨️ Export PDF Executive Report")
+
+    # Hàm lọc ký tự Unicode (Giúp FPDF không bị lỗi khi gặp icon hoặc tiếng Trung)
+    def clean_text(text):
+        text = str(text)
+        text = text.replace('✅ Safe', 'SAFE').replace('⚠ Risk', 'RISK')
+        text = text.replace('±', '+/-').replace('–', '-')
+        # Bỏ qua các ký tự tiếng Trung/Unicode không tương thích để tránh sập app
+        return text.encode('latin-1', 'ignore').decode('latin-1')
+
+    if st.button("Generate & Download PDF Report"):
+        with st.spinner("Đang tổng hợp dữ liệu và kết xuất PDF..."):
+            
+            # Khởi tạo bản in khổ Ngang (Landscape) để chứa đủ các cột dữ liệu
+            pdf = FPDF(orientation='L') 
+            
+            # ---------------------------------------------------------
+            # PHẦN 1: QUALITY SUMMARY BY THICKNESS
+            # ---------------------------------------------------------
+            pdf.add_page()
+            pdf.set_font('Arial', 'B', 16)
+            pdf.cell(0, 10, "QC MECHANICAL PROPERTIES & YIELD REPORT", ln=True, align="C")
+            pdf.ln(5)
+
+            pdf.set_font('Arial', 'B', 12)
+            pdf.cell(0, 10, "1. Quality Summary by Thickness", ln=True)
+            
+            # Thiết lập độ rộng 14 cột cho bảng Summary (Khớp với màn hình dọc)
+            pdf.set_font('Arial', 'B', 8)
+            col_widths_1 = [10, 20] + [15]*5 + [20] + [15]*5 
+            
+            # In Header
+            for i, col in enumerate(display_df.columns):
+                pdf.cell(col_widths_1[i], 8, clean_text(col), border=1, align='C')
+            pdf.ln()
+            
+            # In dữ liệu từng dòng
+            pdf.set_font('Arial', '', 8)
+            for _, row in display_df.iterrows():
+                for i, val in enumerate(row):
+                    pdf.cell(col_widths_1[i], 8, clean_text(val), border=1, align='C')
+                pdf.ln()
+
+            # ---------------------------------------------------------
+            # PHẦN 2: DISTRIBUTION ANALYSIS CHARTS
+            # ---------------------------------------------------------
+            pdf.add_page()
+            pdf.set_font('Arial', 'B', 12)
+            pdf.cell(0, 10, "2. Distribution Analysis (Parallel Clear View)", ln=True)
+            
+            for thick in thickness_list:
+                pdf.set_font('Arial', 'B', 10)
+                pdf.cell(0, 10, f"Thickness Category: {thick}", ln=True)
+                
+                # Căn tọa độ để xếp 2 biểu đồ / 1 hàng ngang
+                x_start = 10
+                y_start = pdf.get_y()
+                x_offset = x_start
+                
+                for feat in mech_features:
+                    img_path = f"dist_{feat}_{thick}.png"
+                    if os.path.exists(img_path):
+                        pdf.image(img_path, x=x_offset, y=y_start, w=130)
+                        x_offset += 135
+                        if x_offset > 150: # Đã vẽ xong 2 hình, xuống hàng
+                            y_start += 70  # Dời tọa độ Y xuống
+                            x_offset = x_start
+                            # Nếu sắp hết trang thì qua trang mới
+                            if y_start > 140: 
+                                pdf.add_page()
+                                y_start = pdf.get_y()
+                pdf.add_page()
+
+            # ---------------------------------------------------------
+            # PHẦN 3: PRODUCTION CONTROL LIMITS & I-MR CHARTS
+            # ---------------------------------------------------------
+            pdf.set_font('Arial', 'B', 12)
+            pdf.cell(0, 10, "3. Production Control Limits & Goals (A-B & Above Focused)", ln=True)
+
+            for thick in thickness_list:
+                pdf.set_font('Arial', 'B', 10)
+                pdf.cell(0, 10, f"Thickness: {thick}", ln=True)
+                
+                # Vẽ bảng Status
+                pdf.set_font('Arial', 'B', 8)
+                headers = ["Feature", "Standard", "Segment Distribution", "Release Range", "Target", f"Tol(+/-{sigma_choice})", "Mill Range", "Status"]
+                col_widths_3 = [15, 25, 75, 35, 15, 20, 35, 20] # Tổng = 240 (Vừa vặn trang ngang)
+                
+                for i, head in enumerate(headers):
+                    pdf.cell(col_widths_3[i], 8, head, border=1, align='C')
+                pdf.ln()
+                
+                pdf.set_font('Arial', '', 8)
+                for row in all_export_data:
+                    if row['Thickness'] == thick:
+                        pdf.cell(col_widths_3[0], 8, clean_text(row.get("Feature", "")), border=1, align='C')
+                        pdf.cell(col_widths_3[1], 8, clean_text(row.get("Internal Standard", "")), border=1, align='C')
+                        pdf.cell(col_widths_3[2], 8, clean_text(row.get("Segment Distribution", "")), border=1, align='C')
+                        pdf.cell(col_widths_3[3], 8, clean_text(row.get("Data-Driven Release Range", "")), border=1, align='C')
+                        pdf.cell(col_widths_3[4], 8, clean_text(row.get("Target Goal", "")), border=1, align='C')
+                        tol_key = f"Tolerance (±{sigma_choice}σ)"
+                        pdf.cell(col_widths_3[5], 8, clean_text(row.get(tol_key, "")), border=1, align='C')
+                        pdf.cell(col_widths_3[6], 8, clean_text(row.get("Mill Range (Proposed)", "")), border=1, align='C')
+                        pdf.cell(col_widths_3[7], 8, clean_text(row.get("Status", "")), border=1, align='C')
+                        pdf.ln()
+                
+                pdf.ln(5)
+                # Chèn ảnh biểu đồ I-MR
+                for feat in mech_features:
+                    img_path = f"imr_{feat}_{thick}.png"
+                    if os.path.exists(img_path):
+                        # Biểu đồ I-MR lớn nên để dàn trải hết bề ngang
+                        pdf.image(img_path, w=260)
+                        pdf.add_page()
+
+            # ---------------------------------------------------------
+            # LƯU VÀ TẢI PDF
+            # ---------------------------------------------------------
+            pdf.output("QC_Report_Temp.pdf")
+            with open("QC_Report_Temp.pdf", "rb") as f:
+                pdf_bytes = f.read()
+                
+            st.download_button(
+                label="📥 Bấm vào đây để tải PDF Report",
+                data=pdf_bytes,
+                file_name="QC_Executive_Report.pdf",
+                mime="application/pdf"
+            )
