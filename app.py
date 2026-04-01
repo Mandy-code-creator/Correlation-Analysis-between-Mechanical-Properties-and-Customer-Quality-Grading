@@ -195,7 +195,7 @@ if uploaded_file is not None:
                         fig.savefig(f"dist_{feat}_{thick}.png", bbox_inches='tight')
             st.markdown("---")
 
-    # --- TAB 3: OPTIMIZATION & I-MR CHARTS ---
+# --- TAB 3: OPTIMIZATION & I-MR CHARTS ---
     with tab3:
         st.header("3. Production Control Limits & Goals (A-B & Above Focused)")
         
@@ -204,6 +204,8 @@ if uploaded_file is not None:
 
         # 1. OVERALL FACTORY
         st.subheader("🌐 Overall Factory Performance Goals")
+        
+        overall_export_data = [] # Khởi tạo list chứa data cho báo cáo Overall
         total_n_overall = df[count_cols].sum().sum()
         seg_dist_overall = "N/A" if total_n_overall == 0 else ", ".join([f"{k.replace('數','')}:{int(round(df[k].sum()/total_n_overall*100))}%" for k in count_cols])
 
@@ -221,14 +223,18 @@ if uploaded_file is not None:
                     m_ov = np.average(v, weights=w)
                     s_ov = np.sqrt(np.average((v - m_ov)**2, weights=w))
                     
+                    # ÁP DỤNG CHỐT CHẶN VẬT LÝ (KHÔNG CHO PHÉP SỐ ÂM)
+                    mill_lower_ov = max(0, int(round(m_ov - 1*s_ov)))
+                    release_lower_ov = max(0, int(round(m_ov - 2*s_ov)))
+                    
                     overall_export_data.append({
                         "Feature": feat, 
                         "Current Limit (2025/12)": spec_str_ov, 
                         "Segment Distribution": seg_dist_overall,
                         "TARGET GOAL": int(round(m_ov)),
                         "TOLERANCE": int(round(s_ov)),
-                        "MILL RANGE 1*SIGMA": f"{int(round(m_ov - 1*s_ov))}-{int(round(m_ov + 1*s_ov))}",
-                        "RELEASE RANGE 2*SIGMA": f"{int(round(m_ov - 2*s_ov))}-{int(round(m_ov + 2*s_ov))}"
+                        "MILL RANGE 1*SIGMA": f"{mill_lower_ov}-{int(round(m_ov + 1*s_ov))}",
+                        "RELEASE RANGE 2*SIGMA": f"{release_lower_ov}-{int(round(m_ov + 2*s_ov))}"
                     })
         st.dataframe(pd.DataFrame(overall_export_data), use_container_width=True, hide_index=True)
 
@@ -262,14 +268,18 @@ if uploaded_file is not None:
                     total_n = df_t[count_cols].sum().sum()
                     seg_dist = "N/A" if total_n == 0 else ", ".join([f"{k.replace('數','')}:{int(round(df_t[k].sum()/total_n*100))}%" for k in count_cols])
                     
+                    # ÁP DỤNG CHỐT CHẶN VẬT LÝ (KHÔNG CHO PHÉP SỐ ÂM)
+                    mill_lower = max(0, int(round(mv - 1*sv)))
+                    release_lower = max(0, int(round(mv - 2*sv)))
+                    
                     row = {
                         "Feature": feat, 
                         "Current Limit (2025/12)": spec_str,
                         "Segment Distribution": seg_dist,
                         "TARGET GOAL": int(round(mv)),
                         "TOLERANCE": int(round(sv)),
-                        "MILL RANGE 1*SIGMA": f"{int(round(mv - 1*sv))}-{int(round(mv + 1*sv))}",
-                        "RELEASE RANGE 2*SIGMA": f"{int(round(mv - 2*sv))}-{int(round(mv + 2*sv))}"
+                        "MILL RANGE 1*SIGMA": f"{mill_lower}-{int(round(mv + 1*sv))}",
+                        "RELEASE RANGE 2*SIGMA": f"{release_lower}-{int(round(mv + 2*sv))}"
                     }
                     thick_status.append(row)
                     
@@ -289,8 +299,10 @@ if uploaded_file is not None:
                     if len(v) > 1:
                         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 7), gridspec_kw={'height_ratios': [2, 1]})
                         
-                        ucl, lcl = mv + 2*sv, mv - 2*sv
+                        # Khóa cứng UCL, LCL ở mức 2 Sigma theo chỉ đạo của Sếp
+                        ucl, lcl = mv + 2*sv, max(0, mv - 2*sv) # Tránh đường LCL bị âm
                         
+                        # Vẽ I-Chart
                         ax1.plot(v, marker='o', color='#1f77b4', ms=4, lw=1, zorder=1)
                         outs = np.where((v > ucl) | (v < lcl))[0]
                         if len(outs) > 0:
@@ -315,6 +327,7 @@ if uploaded_file is not None:
                         ax1.set_title(f"I-Chart: {f} (Thick: {thick})", fontsize=11, fontweight='bold')
                         ax1.set_ylabel("Value")
                         
+                        # Vẽ MR-Chart
                         mr = np.abs(np.diff(v))
                         mrm = np.mean(mr)
                         mru = 3.267 * mrm
