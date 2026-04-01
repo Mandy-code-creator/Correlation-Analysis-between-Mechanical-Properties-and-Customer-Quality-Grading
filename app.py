@@ -195,14 +195,56 @@ if uploaded_file is not None:
                         fig.savefig(f"dist_{feat}_{thick}.png", bbox_inches='tight')
             st.markdown("---")
 
-# --- TAB 3: OPTIMIZATION & I-MR CHARTS (NÂNG CẤP BỘ LỌC IQR) ---
+# --- TAB 3: OPTIMIZATION & I-MR CHARTS (MULTI-METHOD & DYNAMIC PARAMS) ---
     with tab3:
         st.header("3. Production Control Limits & Goals (A-B & Above Focused)")
         
+        # --- BẢNG ĐIỀU KHIỂN THÔNG SỐ (DYNAMIC CONTROLS) ---
+        st.markdown("##### ⚙️ Parameter Configuration")
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            sigma_release = st.number_input("Release Range (Sigma)", min_value=1.0, max_value=6.0, value=2.0, step=0.1)
+        with col2:
+            sigma_mill = st.number_input("Mill Range (Sigma)", min_value=0.5, max_value=4.0, value=1.0, step=0.1)
+        with col3:
+            iqr_k = st.number_input("IQR Filter Factor (k)", min_value=1.0, max_value=4.0, value=1.5, step=0.1)
+        with col4:
+            chart_method = st.radio("I-MR Chart Limits Based On:", ["Standard Method", "IQR Filtered Method"])
+
         spec_limits = {"YS": (405, 500), "TS": (415, 550), "EL": (25, None), "YPE": (4, None)}
         good_cols = [c for c in ['A-B+數', 'A-B數'] if c in df.columns]
 
+        # --- HÀM TÍNH TOÁN DÙNG CHUNG (STANDARD & IQR) ---
+        def calculate_stats(v_arr, w_arr, k_factor):
+            # 1. Standard Method
+            m_std = np.average(v_arr, weights=w_arr)
+            s_std = np.sqrt(np.average((v_arr - m_std)**2, weights=w_arr))
+            
+            # 2. IQR Filtered Method
+            try:
+                expanded_v = np.repeat(v_arr, w_arr.astype(int))
+                q1 = np.percentile(expanded_v, 25)
+                q3 = np.percentile(expanded_v, 75)
+                iqr = q3 - q1
+                
+                lower_iqr = q1 - k_factor * iqr
+                upper_iqr = q3 + k_factor * iqr
+                
+                mask = (v_arr >= lower_iqr) & (v_arr <= upper_iqr)
+                vf, wf = v_arr[mask], w_arr[mask]
+                
+                if len(vf) > 0 and sum(wf) > 0:
+                    m_iqr = np.average(vf, weights=wf)
+                    s_iqr = np.sqrt(np.average((vf - m_iqr)**2, weights=wf))
+                else:
+                    m_iqr, s_iqr = m_std, s_std
+            except:
+                m_iqr, s_iqr = m_std, s_std
+                
+            return (m_std, s_std), (m_iqr, s_iqr)
+
         # 1. OVERALL FACTORY
+        st.markdown("---")
         st.subheader("🌐 Overall Factory Performance Goals")
         
         overall_export_data = [] 
@@ -220,45 +262,28 @@ if uploaded_file is not None:
 
                 if not df_ov.empty:
                     v, w = df_ov[feat].values, df_ov['Good_Qty'].values
+                    (m_std, s_std), (m_iqr, s_iqr) = calculate_stats(v, w, iqr_k)
                     
-                    # --- BỘ LỌC IQR (INTERQUARTILE RANGE) ---
-                    try:
-                        # Tái tạo mảng chi tiết theo số lượng cuộn để tính Percentile chính xác
-                        expanded_v = np.repeat(v, w.astype(int))
-                        q1 = np.percentile(expanded_v, 25)
-                        q3 = np.percentile(expanded_v, 75)
-                        iqr = q3 - q1
-                        
-                        lower_iqr = q1 - 1.5 * iqr
-                        upper_iqr = q3 + 1.5 * iqr
-                        
-                        # Chỉ lấy những điểm dữ liệu nằm trong vùng an toàn của IQR
-                        mask = (v >= lower_iqr) & (v <= upper_iqr)
-                        vf, wf = v[mask], w[mask]
-                        
-                        if len(vf) > 0 and sum(wf) > 0:
-                            m_ov = np.average(vf, weights=wf)
-                            s_ov = np.sqrt(np.average((vf - m_ov)**2, weights=wf))
-                        else:
-                            m_ov = np.average(v, weights=w)
-                            s_ov = np.sqrt(np.average((v - m_ov)**2, weights=w))
-                    except:
-                        m_ov = np.average(v, weights=w)
-                        s_ov = np.sqrt(np.average((v - m_ov)**2, weights=w))
-                    # ----------------------------------------
+                    methods_data = [
+                        ("Standard", m_std, s_std),
+                        (f"IQR (k={iqr_k})", m_iqr, s_iqr)
+                    ]
                     
-                    mill_lower_ov = max(0, int(round(m_ov - 1*s_ov)))
-                    release_lower_ov = max(0, int(round(m_ov - 2*s_ov)))
-                    
-                    overall_export_data.append({
-                        "Feature": feat, 
-                        "Current Limit (2025/12)": spec_str_ov, 
-                        "Segment Distribution": seg_dist_overall,
-                        "TARGET GOAL": int(round(m_ov)),
-                        "TOLERANCE": int(round(s_ov)),
-                        "MILL RANGE 1*SIGMA": f"{mill_lower_ov}-{int(round(m_ov + 1*s_ov))}",
-                        "RELEASE RANGE 2*SIGMA": f"{release_lower_ov}-{int(round(m_ov + 2*s_ov))}"
-                    })
+                    for method_name, m_val, s_val in methods_data:
+                        mill_lower = max(0, int(round(m_val - sigma_mill * s_val)))
+                        release_lower = max(0, int(round(m_val - sigma_release * s_val)))
+                        
+                        overall_export_data.append({
+                            "Feature": feat, 
+                            "Method": method_name,
+                            "Current Limit (2025/12)": spec_str_ov, 
+                            "Segment Distribution": seg_dist_overall,
+                            "TARGET GOAL": int(round(m_val)),
+                            "TOLERANCE": int(round(s_val)),
+                            f"MILL RANGE {sigma_mill}σ": f"{mill_lower}-{int(round(m_val + sigma_mill*s_val))}",
+                            f"RELEASE RANGE {sigma_release}σ": f"{release_lower}-{int(round(m_val + sigma_release*s_val))}"
+                        })
+        
         st.dataframe(pd.DataFrame(overall_export_data), use_container_width=True, hide_index=True)
 
         st.markdown("---")
@@ -284,75 +309,70 @@ if uploaded_file is not None:
 
                 if not temp_calc.empty:
                     v, w = temp_calc[feat].values, temp_calc['Good_Qty'].values
+                    (m_std, s_std), (m_iqr, s_iqr) = calculate_stats(v, w, iqr_k)
                     
-                    # --- BỘ LỌC IQR CHO TỪNG ĐỘ DÀY ---
-                    try:
-                        expanded_v = np.repeat(v, w.astype(int))
-                        q1 = np.percentile(expanded_v, 25)
-                        q3 = np.percentile(expanded_v, 75)
-                        iqr = q3 - q1
-                        
-                        lower_iqr = q1 - 1.5 * iqr
-                        upper_iqr = q3 + 1.5 * iqr
-                        
-                        mask = (v >= lower_iqr) & (v <= upper_iqr)
-                        vf, wf = v[mask], w[mask]
-                        
-                        if len(vf) > 0 and sum(wf) > 0:
-                            mv = np.average(vf, weights=wf)
-                            sv = np.sqrt(np.average((vf - mv)**2, weights=wf))
-                        else:
-                            mv = np.average(v, weights=w)
-                            sv = np.sqrt(np.average((v - mv)**2, weights=w))
-                    except:
-                        mv = np.average(v, weights=w)
-                        sv = np.sqrt(np.average((v - mv)**2, weights=w))
-                    # ----------------------------------
-                    
-                    # Lưu giá trị Mean/Std ĐÃ LỌC SẠCH NHIỄU để vẽ đường chuẩn (UCL/LCL)
-                    # Nhưng lưu mảng 'v' GỐC để vẽ I-Chart (nhằm làm nổi bật các điểm Outlier)
-                    plot_data_dict[thick][feat] = {'values': v, 'mean': mv, 'std': sv}
+                    # Lưu trữ cả 2 bộ thông số để dùng cho I-MR chart tùy theo chọn lựa của user
+                    plot_data_dict[thick][feat] = {
+                        'values': v, 
+                        'mean_std': m_std, 'std_std': s_std,
+                        'mean_iqr': m_iqr, 'std_iqr': s_iqr
+                    }
                     
                     total_n = df_t[count_cols].sum().sum()
                     seg_dist = "N/A" if total_n == 0 else ", ".join([f"{k.replace('數','')}:{int(round(df_t[k].sum()/total_n*100))}%" for k in count_cols])
                     
-                    mill_lower = max(0, int(round(mv - 1*sv)))
-                    release_lower = max(0, int(round(mv - 2*sv)))
+                    methods_data = [
+                        ("Standard", m_std, s_std),
+                        (f"IQR (k={iqr_k})", m_iqr, s_iqr)
+                    ]
                     
-                    row = {
-                        "Feature": feat, 
-                        "Current Limit (2025/12)": spec_str,
-                        "Segment Distribution": seg_dist,
-                        "TARGET GOAL": int(round(mv)),
-                        "TOLERANCE": int(round(sv)),
-                        "MILL RANGE 1*SIGMA": f"{mill_lower}-{int(round(mv + 1*sv))}",
-                        "RELEASE RANGE 2*SIGMA": f"{release_lower}-{int(round(mv + 2*sv))}"
-                    }
-                    thick_status.append(row)
-                    
-                    exp_row = row.copy()
-                    exp_row['Thickness'] = thick
-                    all_export_data.append(exp_row)
+                    for method_name, m_val, s_val in methods_data:
+                        mill_lower = max(0, int(round(m_val - sigma_mill * s_val)))
+                        release_lower = max(0, int(round(m_val - sigma_release * s_val)))
+                        
+                        row = {
+                            "Feature": feat, 
+                            "Method": method_name,
+                            "Current Limit (2025/12)": spec_str,
+                            "Segment Distribution": seg_dist,
+                            "TARGET GOAL": int(round(m_val)),
+                            "TOLERANCE": int(round(s_val)),
+                            f"MILL RANGE {sigma_mill}σ": f"{mill_lower}-{int(round(m_val + sigma_mill*s_val))}",
+                            f"RELEASE RANGE {sigma_release}σ": f"{release_lower}-{int(round(m_val + sigma_release*s_val))}"
+                        }
+                        thick_status.append(row)
+                        
+                        exp_row = row.copy()
+                        exp_row['Thickness'] = thick
+                        all_export_data.append(exp_row)
 
             st.dataframe(pd.DataFrame(thick_status), use_container_width=True, hide_index=True)
             
-            # --- VẼ BIỂU ĐỒ I-MR ---
+            # --- VẼ BIỂU ĐỒ I-MR TÙY BIẾN THEO METHOD CHỌN ---
             cols_imr = st.columns(2)
             top4 = [f for f in ['YS', 'TS', 'EL', 'YPE'] if f in plot_data_dict[thick]]
             for idx, f in enumerate(top4):
                 with cols_imr[idx % 2]:
                     d = plot_data_dict[thick][f]
-                    v, mv, sv = d['values'], d['mean'], d['std'] # mv, sv lúc này là giá trị đã được thanh lọc bằng IQR
+                    v = d['values']
+                    
+                    # Lựa chọn thông số Mean/Std dựa trên Radio Button
+                    if chart_method == "Standard Method":
+                        mv, sv = d['mean_std'], d['std_std']
+                    else:
+                        mv, sv = d['mean_iqr'], d['std_iqr']
+                        
                     if len(v) > 1:
                         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 7), gridspec_kw={'height_ratios': [2, 1]})
                         
-                        ucl, lcl = mv + 2*sv, max(0, mv - 2*sv)
+                        # I-MR dùng Sigma của Release Range làm giới hạn cảnh báo
+                        ucl, lcl = mv + sigma_release*sv, max(0, mv - sigma_release*sv)
                         
-                        # Vẽ I-Chart nguyên bản (bao gồm cả nhiễu) để thấy rõ điểm rớt
+                        # I-Chart
                         ax1.plot(v, marker='o', color='#1f77b4', ms=4, lw=1, zorder=1)
                         outs = np.where((v > ucl) | (v < lcl))[0]
                         if len(outs) > 0:
-                            ax1.scatter(outs, v[outs], color='red', s=60, zorder=2, label='Out of Control (2σ)')
+                            ax1.scatter(outs, v[outs], color='red', s=60, zorder=2, label=f'Out of Control ({sigma_release}σ)')
                             ax1.legend(loc='upper left', fontsize=8)
                         
                         ax1.axhline(mv, color='green', ls='--', lw=1.5)
@@ -370,9 +390,10 @@ if uploaded_file is not None:
                         ax1.text(1.02, v_max, f"Max: {v_max:.1f}", color='gray', transform=trans1, va='center')
                         ax1.text(1.02, v_min, f"Min: {v_min:.1f}", color='gray', transform=trans1, va='center')
 
-                        ax1.set_title(f"I-Chart: {f} (Thick: {thick})", fontsize=11, fontweight='bold')
+                        ax1.set_title(f"I-Chart: {f} ({chart_method})", fontsize=11, fontweight='bold')
                         ax1.set_ylabel("Value")
                         
+                        # MR-Chart
                         mr = np.abs(np.diff(v))
                         mrm = np.mean(mr)
                         mru = 3.267 * mrm
@@ -416,7 +437,7 @@ if uploaded_file is not None:
     
     def clean(t): return str(t).replace('±', '+/-').replace('–', '-').encode('latin-1', 'ignore').decode('latin-1')
 
-    # NÚT XUẤT BÁO CÁO TỔNG QUAN (OVERALL ONLY)
+    # NÚT XUẤT BÁO CÁO TỔNG QUAN
     if st.sidebar.button("Generate OVERALL PDF (Executive)"):
         pdf_ov = FPDF(orientation='L')
         
@@ -437,16 +458,17 @@ if uploaded_file is not None:
 
         pdf_ov.add_page(); pdf_ov.set_font('Arial', 'B', 12); pdf_ov.cell(0, 10, "3. Overall Factory Performance Goals", ln=True)
         
-        # Cập nhật thứ tự tiêu đề và độ rộng cột trong PDF
-        heads = ["Feature", "Current Limit (2025/12)", "Segment Dist", "TARGET GOAL", "TOLERANCE", "MILL RANGE 1*SIGMA", "RELEASE RANGE 2*SIGMA"]
-        c_w3 = [18, 36, 60, 22, 22, 38, 39] 
+        # Cập nhật PDF có thêm cột "Method" và Dynamic Sigma titles
+        heads = ["Feature", "Method", "Limit (25/12)", "Segment Dist", "TARGET", "TOL", f"MILL {sigma_mill}σ", f"RELEASE {sigma_release}σ"]
+        # Phân bổ lại độ rộng cột sao cho tổng = ~270mm (A4 Landscape usable space)
+        c_w3 = [16, 22, 24, 60, 15, 12, 28, 30] 
+        
         pdf_ov.set_font('Arial', 'B', 8)
         for i, h in enumerate(heads): pdf_ov.cell(c_w3[i], 7, clean(h), border=1, align='C')
         pdf_ov.ln(); pdf_ov.set_font('Arial', '', 7)
         
         for row in overall_export_data:
-            # Sắp xếp lại danh sách giá trị truyền vào theo đúng thứ tự cột mới
-            v_list = [row["Feature"], row["Current Limit (2025/12)"], row["Segment Distribution"], str(row["TARGET GOAL"]), str(row["TOLERANCE"]), row["MILL RANGE 1*SIGMA"], row["RELEASE RANGE 2*SIGMA"]]
+            v_list = [row["Feature"], row["Method"], row["Current Limit (2025/12)"], row["Segment Distribution"], str(row["TARGET GOAL"]), str(row["TOLERANCE"]), row[f"MILL RANGE {sigma_mill}σ"], row[f"RELEASE RANGE {sigma_release}σ"]]
             for i, v in enumerate(v_list): pdf_ov.cell(c_w3[i], 7, clean(v), border=1, align='C')
             pdf_ov.ln()
 
@@ -454,7 +476,7 @@ if uploaded_file is not None:
         with open("QC_Overall_Report.pdf", "rb") as f:
             st.sidebar.download_button("📥 Download OVERALL PDF", f.read(), "QC_Overall_Report.pdf", "application/pdf")
 
-    # NÚT XUẤT BÁO CÁO ĐẦY ĐỦ (FULL DETAILED)
+    # NÚT XUẤT BÁO CÁO ĐẦY ĐỦ
     if st.sidebar.button("Generate FULL PDF (Detailed)"):
         pdf = FPDF(orientation='L')
         
@@ -474,27 +496,25 @@ if uploaded_file is not None:
             if os.path.exists(path): pdf.image(path, x=(10 if idx%2==0 else 150), y=(ys if idx<2 else ys+75), w=135)
 
         for thick in thickness_list:
-            pdf.add_page(); pdf.set_font('Arial', 'B', 12); pdf.cell(0, 10, f"3. Distribution Analysis - Thickness: {thick}", ln=True); ys = pdf.get_y()
+            pdf.add_page(); pdf.set_font('Arial', 'B', 12); pdf.cell(0, 10, f"3. Distribution - Thick: {thick}", ln=True); ys = pdf.get_y()
             for idx, f in enumerate(['YS', 'TS', 'EL', 'YPE']):
                 path = f"dist_{f}_{thick}.png"
                 if os.path.exists(path): pdf.image(path, x=(10 if idx%2==0 else 150), y=(ys if idx<2 else ys+75), w=135)
             
-            pdf.add_page(); pdf.set_font('Arial', 'B', 12); pdf.cell(0, 10, f"4. Control Limits & Targets - Thickness: {thick}", ln=True)
+            pdf.add_page(); pdf.set_font('Arial', 'B', 12); pdf.cell(0, 10, f"4. Control Limits - Thick: {thick}", ln=True)
             
-            # Cập nhật thứ tự tiêu đề và độ rộng cột trong PDF
-            heads = ["Feature", "Current Limit (2025/12)", "Segment Dist", "TARGET GOAL", "TOLERANCE", "MILL RANGE 1*SIGMA", "RELEASE RANGE 2*SIGMA"]
-            c_w3 = [18, 36, 60, 22, 22, 38, 39] 
+            heads = ["Feature", "Method", "Limit (25/12)", "Segment Dist", "TARGET", "TOL", f"MILL {sigma_mill}σ", f"RELEASE {sigma_release}σ"]
+            c_w3 = [16, 22, 24, 60, 15, 12, 28, 30] 
             pdf.set_font('Arial', 'B', 8)
             for i, h in enumerate(heads): pdf.cell(c_w3[i], 7, clean(h), border=1, align='C')
             pdf.ln(); pdf.set_font('Arial', '', 7)
             for row in all_export_data:
                 if row['Thickness'] == thick:
-                    # Sắp xếp lại danh sách giá trị truyền vào theo đúng thứ tự cột mới
-                    v_list = [row["Feature"], row["Current Limit (2025/12)"], row["Segment Distribution"], str(row["TARGET GOAL"]), str(row["TOLERANCE"]), row["MILL RANGE 1*SIGMA"], row["RELEASE RANGE 2*SIGMA"]]
+                    v_list = [row["Feature"], row["Method"], row["Current Limit (2025/12)"], row["Segment Distribution"], str(row["TARGET GOAL"]), str(row["TOLERANCE"]), row[f"MILL RANGE {sigma_mill}σ"], row[f"RELEASE RANGE {sigma_release}σ"]]
                     for i, v in enumerate(v_list): pdf.cell(c_w3[i], 7, clean(v), border=1, align='C')
                     pdf.ln()
             
-            pdf.add_page(); pdf.set_font('Arial', 'B', 12); pdf.cell(0, 10, f"5. I-MR Control Charts - Thickness: {thick}", ln=True)
+            pdf.add_page(); pdf.set_font('Arial', 'B', 12); pdf.cell(0, 10, f"5. I-MR Charts - Thick: {thick}", ln=True)
             y_imr = pdf.get_y() + 2 
             for idx, f in enumerate(['YS', 'TS', 'EL', 'YPE']):
                 path = f"imr_{f}_{thick}.png"
