@@ -195,7 +195,7 @@ if uploaded_file is not None:
                         fig.savefig(f"dist_{feat}_{thick}.png", bbox_inches='tight')
             st.markdown("---")
 
-# --- TAB 3: OPTIMIZATION & I-MR CHARTS ---
+# --- TAB 3: OPTIMIZATION & I-MR CHARTS (NÂNG CẤP BỘ LỌC IQR) ---
     with tab3:
         st.header("3. Production Control Limits & Goals (A-B & Above Focused)")
         
@@ -205,7 +205,7 @@ if uploaded_file is not None:
         # 1. OVERALL FACTORY
         st.subheader("🌐 Overall Factory Performance Goals")
         
-        overall_export_data = [] # Khởi tạo list chứa data cho báo cáo Overall
+        overall_export_data = [] 
         total_n_overall = df[count_cols].sum().sum()
         seg_dist_overall = "N/A" if total_n_overall == 0 else ", ".join([f"{k.replace('數','')}:{int(round(df[k].sum()/total_n_overall*100))}%" for k in count_cols])
 
@@ -220,10 +220,33 @@ if uploaded_file is not None:
 
                 if not df_ov.empty:
                     v, w = df_ov[feat].values, df_ov['Good_Qty'].values
-                    m_ov = np.average(v, weights=w)
-                    s_ov = np.sqrt(np.average((v - m_ov)**2, weights=w))
                     
-                    # ÁP DỤNG CHỐT CHẶN VẬT LÝ (KHÔNG CHO PHÉP SỐ ÂM)
+                    # --- BỘ LỌC IQR (INTERQUARTILE RANGE) ---
+                    try:
+                        # Tái tạo mảng chi tiết theo số lượng cuộn để tính Percentile chính xác
+                        expanded_v = np.repeat(v, w.astype(int))
+                        q1 = np.percentile(expanded_v, 25)
+                        q3 = np.percentile(expanded_v, 75)
+                        iqr = q3 - q1
+                        
+                        lower_iqr = q1 - 1.5 * iqr
+                        upper_iqr = q3 + 1.5 * iqr
+                        
+                        # Chỉ lấy những điểm dữ liệu nằm trong vùng an toàn của IQR
+                        mask = (v >= lower_iqr) & (v <= upper_iqr)
+                        vf, wf = v[mask], w[mask]
+                        
+                        if len(vf) > 0 and sum(wf) > 0:
+                            m_ov = np.average(vf, weights=wf)
+                            s_ov = np.sqrt(np.average((vf - m_ov)**2, weights=wf))
+                        else:
+                            m_ov = np.average(v, weights=w)
+                            s_ov = np.sqrt(np.average((v - m_ov)**2, weights=w))
+                    except:
+                        m_ov = np.average(v, weights=w)
+                        s_ov = np.sqrt(np.average((v - m_ov)**2, weights=w))
+                    # ----------------------------------------
+                    
                     mill_lower_ov = max(0, int(round(m_ov - 1*s_ov)))
                     release_lower_ov = max(0, int(round(m_ov - 2*s_ov)))
                     
@@ -261,14 +284,38 @@ if uploaded_file is not None:
 
                 if not temp_calc.empty:
                     v, w = temp_calc[feat].values, temp_calc['Good_Qty'].values
-                    mv = np.average(v, weights=w)
-                    sv = np.sqrt(np.average((v - mv)**2, weights=w))
+                    
+                    # --- BỘ LỌC IQR CHO TỪNG ĐỘ DÀY ---
+                    try:
+                        expanded_v = np.repeat(v, w.astype(int))
+                        q1 = np.percentile(expanded_v, 25)
+                        q3 = np.percentile(expanded_v, 75)
+                        iqr = q3 - q1
+                        
+                        lower_iqr = q1 - 1.5 * iqr
+                        upper_iqr = q3 + 1.5 * iqr
+                        
+                        mask = (v >= lower_iqr) & (v <= upper_iqr)
+                        vf, wf = v[mask], w[mask]
+                        
+                        if len(vf) > 0 and sum(wf) > 0:
+                            mv = np.average(vf, weights=wf)
+                            sv = np.sqrt(np.average((vf - mv)**2, weights=wf))
+                        else:
+                            mv = np.average(v, weights=w)
+                            sv = np.sqrt(np.average((v - mv)**2, weights=w))
+                    except:
+                        mv = np.average(v, weights=w)
+                        sv = np.sqrt(np.average((v - mv)**2, weights=w))
+                    # ----------------------------------
+                    
+                    # Lưu giá trị Mean/Std ĐÃ LỌC SẠCH NHIỄU để vẽ đường chuẩn (UCL/LCL)
+                    # Nhưng lưu mảng 'v' GỐC để vẽ I-Chart (nhằm làm nổi bật các điểm Outlier)
                     plot_data_dict[thick][feat] = {'values': v, 'mean': mv, 'std': sv}
                     
                     total_n = df_t[count_cols].sum().sum()
                     seg_dist = "N/A" if total_n == 0 else ", ".join([f"{k.replace('數','')}:{int(round(df_t[k].sum()/total_n*100))}%" for k in count_cols])
                     
-                    # ÁP DỤNG CHỐT CHẶN VẬT LÝ (KHÔNG CHO PHÉP SỐ ÂM)
                     mill_lower = max(0, int(round(mv - 1*sv)))
                     release_lower = max(0, int(round(mv - 2*sv)))
                     
@@ -295,14 +342,13 @@ if uploaded_file is not None:
             for idx, f in enumerate(top4):
                 with cols_imr[idx % 2]:
                     d = plot_data_dict[thick][f]
-                    v, mv, sv = d['values'], d['mean'], d['std']
+                    v, mv, sv = d['values'], d['mean'], d['std'] # mv, sv lúc này là giá trị đã được thanh lọc bằng IQR
                     if len(v) > 1:
                         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 7), gridspec_kw={'height_ratios': [2, 1]})
                         
-                        # Khóa cứng UCL, LCL ở mức 2 Sigma theo chỉ đạo của Sếp
-                        ucl, lcl = mv + 2*sv, max(0, mv - 2*sv) # Tránh đường LCL bị âm
+                        ucl, lcl = mv + 2*sv, max(0, mv - 2*sv)
                         
-                        # Vẽ I-Chart
+                        # Vẽ I-Chart nguyên bản (bao gồm cả nhiễu) để thấy rõ điểm rớt
                         ax1.plot(v, marker='o', color='#1f77b4', ms=4, lw=1, zorder=1)
                         outs = np.where((v > ucl) | (v < lcl))[0]
                         if len(outs) > 0:
@@ -327,7 +373,6 @@ if uploaded_file is not None:
                         ax1.set_title(f"I-Chart: {f} (Thick: {thick})", fontsize=11, fontweight='bold')
                         ax1.set_ylabel("Value")
                         
-                        # Vẽ MR-Chart
                         mr = np.abs(np.diff(v))
                         mrm = np.mean(mr)
                         mru = 3.267 * mrm
